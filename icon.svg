@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e3a5f"/>
+    </linearGradient>
+    <linearGradient id="fishGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#22d3ee"/>
+      <stop offset="100%" style="stop-color:#0ea5e9"/>
+    </linearGradient>
+    <linearGradient id="waterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#0ea5e9;stop-opacity:0.1"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="url(#bgGrad)"/>
+  
+  <!-- Water waves -->
+  <path d="M0 350 Q128 320 256 350 T512 350 L512 512 L0 512 Z" fill="url(#waterGrad)"/>
+  <path d="M0 380 Q128 360 256 380 T512 380 L512 512 L0 512 Z" fill="url(#waterGrad)" opacity="0.5"/>
+  
+  <!-- Fish body -->
+  <ellipse cx="256" cy="240" rx="140" ry="80" fill="url(#fishGrad)"/>
+  
+  <!-- Fish tail -->
+  <path d="M380 240 L460 180 L460 300 Z" fill="url(#fishGrad)"/>
+  
+  <!-- Fish fin (top) -->
+  <path d="M220 160 L280 120 L300 160 Z" fill="#0ea5e9"/>
+  
+  <!-- Fish fin (bottom) -->
+  <path d="M200 280 L240 320 L180 300 Z" fill="#0ea5e9"/>
+  
+  <!-- Fish eye -->
+  <circle cx="160" cy="230" r="25" fill="white"/>
+  <circle cx="155" cy="228" r="12" fill="#0f172a"/>
+  <circle cx="150" cy="224" r="4" fill="white"/>
+  
+  <!-- Fish mouth -->
+  <ellipse cx="105" cy="245" rx="8" ry="12" fill="#0f172a" opacity="0.3"/>
+  
+  <!-- Bubbles -->
+  <circle cx="90" cy="180" r="15" fill="white" opacity="0.4"/>
+  <circle cx="70" cy="140" r="10" fill="white" opacity="0.3"/>
+  <circle cx="100" cy="120" r="8" fill="white" opacity="0.25"/>
+  
+  <!-- Fish scales pattern -->
+  <g fill="none" stroke="#0f172a" stroke-width="1" opacity="0.15">
+    <path d="M180 200 Q200 220 180 240"/>
+    <path d="M220 200 Q240 220 220 240"/>
+    <path d="M260 200 Q280 220 260 240"/>
+    <path d="M300 200 Q320 220 300 240"/>
+    <path d="M340 210 Q360 230 340 250"/>
+    <path d="M200 240 Q220 260 200 280"/>
+    <path d="M240 240 Q260 260 240 280"/>
+    <path d="M280 240 Q300 260 280 280"/>
+    <path d="M320 230 Q340 250 320 270"/>
+  </g>
+</svg>
