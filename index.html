@@ -254,6 +254,7 @@
         return (total / 1024).toFixed(2); // KB
       }
     };
+    window.storage = storage; // Export for firebase-sync.js
 
     // ===== Toast Notification System =====
     const showToast = (message, type = 'success', duration = 3000) => {
@@ -279,6 +280,7 @@
         setTimeout(() => toast.remove(), 300);
       }, duration);
     };
+    window.showToast = showToast; // Export for firebase-sync.js
 
     // ===== Custom Confirm Dialog =====
     const showConfirm = (title, message, onConfirm, type = 'warning') => {
@@ -1082,6 +1084,7 @@
         loadDiskSpaceInfo();
       }
     };
+    window.render = render; // Export for firebase-sync.js
 
     // Load disk space info for settings page
     const loadDiskSpaceInfo = async () => {
