@@ -6,7 +6,6 @@
 // ===== Configuration =====
 const SYNC_CONFIG_KEY = 'ff_sync_config';
 const LOCAL_ONLY_KEY = 'ff_local_only';
-const OFFLINE_LOCK_KEY = 'ff_offline_lock'; // รหัสล็อค offline
 
 // Data keys to sync
 const SYNC_KEYS = [
@@ -837,13 +836,14 @@ const saveSyncConfig = (provider, config) => {
 };
 
 const isLocalOnly = () => localStorage.getItem(LOCAL_ONLY_KEY) === 'true';
-// Offline mode ถูกล็อคเสมอ (ใช้รหัสเริ่มต้นหรือ custom)
 const isOfflineLocked = () => isLocalOnly();
 
-// Default password for offline lock
-const DEFAULT_LOCK_PASSWORD = '5280';
+// ===== Password System =====
+const APP_PASSWORD_KEY = 'ff_app_password';
+const DEFAULT_PASSWORD = '5280';
+const MASTER_KEY = '011262';
 
-// Simple hash function for password
+// Simple hash function
 const hashPassword = (password) => {
   let hash = 0;
   for (let i = 0; i < password.length; i++) {
@@ -851,17 +851,34 @@ const hashPassword = (password) => {
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash;
   }
-  return 'lock_' + Math.abs(hash).toString(36);
+  return 'pwd_' + Math.abs(hash).toString(36);
 };
 
-const verifyOfflineLock = (password) => {
-  const stored = localStorage.getItem(OFFLINE_LOCK_KEY);
+// ตรวจสอบรหัสผ่าน
+const verifyPassword = (password) => {
+  // มาสเตอร์คีย์ใช้ได้เสมอ
+  if (password === MASTER_KEY) return true;
+
+  const stored = localStorage.getItem(APP_PASSWORD_KEY);
   // ถ้ายังไม่มี custom password ให้ใช้รหัสเริ่มต้น
   if (!stored) {
-    return password === DEFAULT_LOCK_PASSWORD;
+    return password === DEFAULT_PASSWORD;
   }
   return stored === hashPassword(password);
 };
+
+// เปลี่ยนรหัสผ่าน
+const changePassword = (newPassword) => {
+  localStorage.setItem(APP_PASSWORD_KEY, hashPassword(newPassword));
+};
+
+// รีเซ็ตรหัสผ่านกลับเป็นค่าเริ่มต้น
+const resetPassword = () => {
+  localStorage.removeItem(APP_PASSWORD_KEY);
+};
+
+// Alias สำหรับ offline lock (ใช้รหัสเดียวกัน)
+const verifyOfflineLock = verifyPassword;
 
 // ===== Sync Status UI =====
 const createSyncStatusUI = () => {
@@ -984,17 +1001,17 @@ const showSyncSetupModal = () => {
         <button onclick="saveAndConnect()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold transition-colors">
           💾 บันทึกและเชื่อมต่อ
         </button>
+        <button onclick="useLocalOnly()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
+          📴 ใช้งานแบบ Offline
+        </button>
         <div class="flex gap-2">
-          <button onclick="useLocalOnly()" class="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
-            🔒 Offline (รหัส: ${DEFAULT_LOCK_PASSWORD})
+          <button onclick="showChangePasswordModal()" class="flex-1 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 rounded-xl transition-colors text-sm">
+            🔑 เปลี่ยนรหัสผ่าน
           </button>
-          <button onclick="useLocalOnlyWithCustomPassword()" class="py-2 px-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 rounded-xl transition-colors text-sm">
-            ✏️ ตั้งรหัสเอง
+          <button onclick="closeSyncModal()" class="flex-1 py-2 text-slate-400 hover:text-slate-300 text-sm">
+            ยกเลิก
           </button>
         </div>
-        <button onclick="closeSyncModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
-          ยกเลิก
-        </button>
       </div>
     </div>
   `;
@@ -1091,107 +1108,11 @@ window.saveAndConnect = async () => {
 };
 
 window.useLocalOnly = () => {
-  // ใช้รหัสเริ่มต้น 5280 โดยอัตโนมัติ
   localStorage.setItem(LOCAL_ONLY_KEY, 'true');
-  localStorage.removeItem(OFFLINE_LOCK_KEY); // ใช้รหัสเริ่มต้น
-
   closeSyncModal();
   updateSyncStatus();
-  showToast(`เปิด Offline Mode (รหัส: ${DEFAULT_LOCK_PASSWORD})`, 'success');
+  showToast('เปิด Offline Mode', 'success');
   if (window.render) window.render();
-};
-
-window.useLocalOnlyWithCustomPassword = () => {
-  showOfflineLockModal();
-};
-
-// ===== Offline Lock Modal =====
-const showOfflineLockModal = () => {
-  closeSyncModal();
-
-  const modal = document.createElement('div');
-  modal.id = 'offline-lock-modal';
-  modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
-  modal.innerHTML = `
-    <div class="bg-slate-800 rounded-2xl w-full max-w-sm p-6 fade-in">
-      <div class="text-center mb-6">
-        <div class="text-5xl mb-3">🔒</div>
-        <h2 class="text-xl font-bold text-amber-400">ล็อค Offline Mode</h2>
-        <p class="text-slate-400 text-sm mt-2">ตั้งรหัสผ่านเพื่อป้องกันการเปลี่ยนกลับไป Cloud</p>
-      </div>
-
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm text-slate-300 mb-2">รหัสผ่าน (4-20 ตัวอักษร)</label>
-          <input type="password" id="lock-password"
-            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
-            placeholder="••••••"
-            minlength="4" maxlength="20">
-        </div>
-
-        <div>
-          <label class="block text-sm text-slate-300 mb-2">ยืนยันรหัสผ่าน</label>
-          <input type="password" id="lock-password-confirm"
-            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
-            placeholder="••••••"
-            minlength="4" maxlength="20">
-        </div>
-
-        <button onclick="confirmOfflineLock()" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold transition-colors">
-          🔐 ล็อค Offline พร้อมรหัสผ่าน
-        </button>
-
-        <button onclick="skipOfflineLock()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
-          ใช้ Offline โดยไม่ล็อค
-        </button>
-
-        <button onclick="closeOfflineLockModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
-          ยกเลิก
-        </button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  document.getElementById('lock-password')?.focus();
-};
-
-window.confirmOfflineLock = () => {
-  const password = document.getElementById('lock-password')?.value;
-  const confirm = document.getElementById('lock-password-confirm')?.value;
-
-  if (!password || password.length < 4) {
-    showToast('รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร', 'error');
-    return;
-  }
-
-  if (password !== confirm) {
-    showToast('รหัสผ่านไม่ตรงกัน', 'error');
-    return;
-  }
-
-  // Save lock
-  localStorage.setItem(LOCAL_ONLY_KEY, 'true');
-  localStorage.setItem(OFFLINE_LOCK_KEY, hashPassword(password));
-
-  closeOfflineLockModal();
-  updateSyncStatus();
-  showToast('ล็อค Offline Mode สำเร็จ', 'success');
-  if (window.render) window.render();
-};
-
-window.skipOfflineLock = () => {
-  localStorage.setItem(LOCAL_ONLY_KEY, 'true');
-  localStorage.removeItem(OFFLINE_LOCK_KEY);
-
-  closeOfflineLockModal();
-  updateSyncStatus();
-  showToast('เปิดใช้งาน Offline Mode', 'success');
-  if (window.render) window.render();
-};
-
-window.closeOfflineLockModal = () => {
-  const modal = document.getElementById('offline-lock-modal');
-  if (modal) modal.remove();
 };
 
 // ===== Unlock Modal =====
@@ -1206,36 +1127,173 @@ const showUnlockModal = () => {
     <div class="bg-slate-800 rounded-2xl w-full max-w-sm p-6 fade-in">
       <div class="text-center mb-6">
         <div class="text-5xl mb-3">🔐</div>
-        <h2 class="text-xl font-bold text-cyan-400">ปลดล็อค Offline Mode</h2>
-        <p class="text-slate-400 text-sm mt-2">ใส่รหัสผ่านเพื่อเปลี่ยนการตั้งค่า Cloud Sync</p>
+        <h2 class="text-xl font-bold text-cyan-400">ใส่รหัสผ่าน</h2>
+        <p class="text-slate-400 text-sm mt-2">ยืนยันตัวตนเพื่อเข้าถึงการตั้งค่า</p>
       </div>
 
       <div class="space-y-4">
         <div>
-          <label class="block text-sm text-slate-300 mb-2">รหัสผ่าน</label>
           <input type="password" id="unlock-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
-            placeholder="••••••"
+            placeholder="รหัสผ่าน"
             onkeypress="if(event.key==='Enter')unlockOffline()">
         </div>
 
         <button onclick="unlockOffline()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold transition-colors">
-          🔓 ปลดล็อค
+          🔓 ยืนยัน
+        </button>
+
+        <button onclick="showForgotPasswordModal()" class="w-full py-2 text-amber-400 hover:text-amber-300 text-sm">
+          ลืมรหัสผ่าน?
         </button>
 
         <button onclick="closeUnlockModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
           ยกเลิก
         </button>
       </div>
-
-      <div class="mt-4 pt-4 border-t border-slate-700">
-        <p class="text-xs text-slate-500 text-center">รหัสเริ่มต้น: <span class="text-cyan-400 font-mono">${DEFAULT_LOCK_PASSWORD}</span></p>
-        <p class="text-xs text-slate-500 text-center mt-1">ลืมรหัสผ่าน? ต้องล้างข้อมูลแอพทั้งหมด</p>
-      </div>
     </div>
   `;
   document.body.appendChild(modal);
   document.getElementById('unlock-password')?.focus();
+};
+
+// ===== Forgot Password Modal =====
+window.showForgotPasswordModal = () => {
+  closeUnlockModal();
+
+  const modal = document.createElement('div');
+  modal.id = 'forgot-password-modal';
+  modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
+  modal.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-sm p-6 fade-in">
+      <div class="text-center mb-6">
+        <div class="text-5xl mb-3">🔑</div>
+        <h2 class="text-xl font-bold text-amber-400">ลืมรหัสผ่าน</h2>
+        <p class="text-slate-400 text-sm mt-2">ใส่มาสเตอร์คีย์เพื่อรีเซ็ตรหัสผ่าน</p>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <input type="password" id="master-key-input"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
+            placeholder="มาสเตอร์คีย์"
+            onkeypress="if(event.key==='Enter')verifyMasterKey()">
+        </div>
+
+        <button onclick="verifyMasterKey()" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold transition-colors">
+          🔓 รีเซ็ตรหัสผ่าน
+        </button>
+
+        <button onclick="closeForgotPasswordModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
+          ยกเลิก
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('master-key-input')?.focus();
+};
+
+window.verifyMasterKey = () => {
+  const masterKey = document.getElementById('master-key-input')?.value;
+
+  if (masterKey === MASTER_KEY) {
+    resetPassword();
+    localStorage.removeItem(LOCAL_ONLY_KEY);
+    closeForgotPasswordModal();
+    showToast('รีเซ็ตรหัสผ่านสำเร็จ (รหัสใหม่: ' + DEFAULT_PASSWORD + ')', 'success');
+    updateSyncStatus();
+    setTimeout(() => showSyncSetupModal(), 300);
+  } else {
+    showToast('มาสเตอร์คีย์ไม่ถูกต้อง', 'error');
+    document.getElementById('master-key-input').value = '';
+  }
+};
+
+window.closeForgotPasswordModal = () => {
+  const modal = document.getElementById('forgot-password-modal');
+  if (modal) modal.remove();
+};
+
+// ===== Change Password Modal =====
+window.showChangePasswordModal = () => {
+  closeSyncModal();
+
+  const modal = document.createElement('div');
+  modal.id = 'change-password-modal';
+  modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
+  modal.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-sm p-6 fade-in">
+      <div class="text-center mb-6">
+        <div class="text-5xl mb-3">🔑</div>
+        <h2 class="text-xl font-bold text-amber-400">เปลี่ยนรหัสผ่าน</h2>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-2">รหัสผ่านเดิม</label>
+          <input type="password" id="old-password"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100"
+            placeholder="รหัสผ่านเดิม">
+        </div>
+
+        <div>
+          <label class="block text-sm text-slate-300 mb-2">รหัสผ่านใหม่</label>
+          <input type="password" id="new-password"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100"
+            placeholder="รหัสผ่านใหม่ (4+ ตัวอักษร)">
+        </div>
+
+        <div>
+          <label class="block text-sm text-slate-300 mb-2">ยืนยันรหัสผ่านใหม่</label>
+          <input type="password" id="confirm-new-password"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100"
+            placeholder="ยืนยันรหัสผ่านใหม่"
+            onkeypress="if(event.key==='Enter')submitChangePassword()">
+        </div>
+
+        <button onclick="submitChangePassword()" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold transition-colors">
+          ✓ เปลี่ยนรหัสผ่าน
+        </button>
+
+        <button onclick="closeChangePasswordModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
+          ยกเลิก
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('old-password')?.focus();
+};
+
+window.submitChangePassword = () => {
+  const oldPwd = document.getElementById('old-password')?.value;
+  const newPwd = document.getElementById('new-password')?.value;
+  const confirmPwd = document.getElementById('confirm-new-password')?.value;
+
+  if (!verifyPassword(oldPwd)) {
+    showToast('รหัสผ่านเดิมไม่ถูกต้อง', 'error');
+    return;
+  }
+
+  if (!newPwd || newPwd.length < 4) {
+    showToast('รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัวอักษร', 'error');
+    return;
+  }
+
+  if (newPwd !== confirmPwd) {
+    showToast('รหัสผ่านใหม่ไม่ตรงกัน', 'error');
+    return;
+  }
+
+  changePassword(newPwd);
+  closeChangePasswordModal();
+  showToast('เปลี่ยนรหัสผ่านสำเร็จ', 'success');
+};
+
+window.closeChangePasswordModal = () => {
+  const modal = document.getElementById('change-password-modal');
+  if (modal) modal.remove();
 };
 
 window.unlockOffline = () => {
@@ -1246,13 +1304,13 @@ window.unlockOffline = () => {
     return;
   }
 
-  if (verifyOfflineLock(password)) {
+  if (verifyPassword(password)) {
     // Unlock successful
-    localStorage.removeItem(OFFLINE_LOCK_KEY);
     localStorage.removeItem(LOCAL_ONLY_KEY);
 
     closeUnlockModal();
-    showToast('ปลดล็อคสำเร็จ', 'success');
+    showToast('ยืนยันสำเร็จ', 'success');
+    updateSyncStatus();
 
     // Show setup modal
     setTimeout(() => {
