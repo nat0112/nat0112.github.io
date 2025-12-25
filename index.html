@@ -1891,23 +1891,63 @@
           </div>
 
           <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50 mb-4">
-            <h3 class="font-semibold mb-3">☁️ Cloud Sync</h3>
-            <p class="text-sm text-slate-400 mb-3">Sync ข้อมูลข้ามอุปกรณ์ผ่าน Firebase</p>
+            <h3 class="font-semibold mb-3">☁️ Firebase Cloud Sync</h3>
+            <p class="text-sm text-slate-400 mb-3">Sync ข้อมูลข้ามอุปกรณ์อัตโนมัติ</p>
+
             ${isLocalOnly() ? `
-              <div class="flex items-center gap-2 p-3 bg-slate-700/30 border border-slate-600 rounded-xl mb-3">
-                <span class="text-slate-400">○</span>
-                <span class="text-sm text-slate-400">ใช้งานแบบ Offline อยู่</span>
+              <!-- Offline Mode -->
+              <div class="flex items-center gap-3 p-4 bg-slate-700/30 border border-slate-600 rounded-xl mb-4">
+                <div class="w-12 h-12 rounded-full bg-slate-600/50 flex items-center justify-center text-2xl">📴</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-300">โหมด Offline</div>
+                  <div class="text-xs text-slate-500">ข้อมูลเก็บในเครื่องเท่านั้น</div>
+                </div>
               </div>
-              <button onclick="showFirebaseSetup()" class="w-full p-3 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 rounded-xl transition-colors text-sm">
-                ⚙️ ตั้งค่า Firebase
+              <button onclick="showFirebaseSetupWizard()" class="w-full p-4 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 border border-cyan-500/30 text-cyan-400 rounded-xl transition-all text-sm font-medium flex items-center justify-center gap-2">
+                <span class="text-xl">☁️</span>
+                <span>เปิดใช้งาน Cloud Sync</span>
               </button>
             ` : `
-              <div class="flex items-center gap-2 p-3 ${isOnline ? 'bg-green-500/10 border-green-500/30' : 'bg-amber-500/10 border-amber-500/30'} border rounded-xl mb-3">
-                <span class="${isOnline ? 'text-green-400' : 'text-amber-400'}">●</span>
-                <span class="text-sm ${isOnline ? 'text-green-400' : 'text-amber-400'}">${isOnline ? 'เชื่อมต่อแล้ว' : 'รอเชื่อมต่อ...'}</span>
+              <!-- Online Mode -->
+              <div class="flex items-center gap-3 p-4 ${isOnline ? 'bg-green-500/10 border-green-500/30' : 'bg-amber-500/10 border-amber-500/30'} border rounded-xl mb-4">
+                <div class="w-12 h-12 rounded-full ${isOnline ? 'bg-green-500/20' : 'bg-amber-500/20'} flex items-center justify-center text-2xl">
+                  ${isOnline ? '✅' : '⏳'}
+                </div>
+                <div class="flex-1">
+                  <div class="font-medium ${isOnline ? 'text-green-400' : 'text-amber-400'}">
+                    ${isOnline ? 'เชื่อมต่อแล้ว' : 'กำลังเชื่อมต่อ...'}
+                  </div>
+                  <div class="text-xs ${isOnline ? 'text-green-500/70' : 'text-amber-500/70'}">
+                    ${isOnline ? 'ข้อมูลจะ sync อัตโนมัติ' : 'รอสัญญาณ...'}
+                  </div>
+                </div>
+                <div class="text-2xl ${isOnline ? '' : 'animate-pulse'}">
+                  ${isOnline ? '🟢' : '🟡'}
+                </div>
               </div>
-              <button onclick="resetFirebaseConfig()" class="w-full p-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-colors text-sm">
-                🔄 รีเซ็ตการตั้งค่า Firebase
+
+              <!-- Sync Actions -->
+              <div class="grid grid-cols-2 gap-2 mb-4">
+                <button onclick="manualSyncUpload()" class="p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline ? 'disabled' : ''}>
+                  <span class="text-xl">📤</span>
+                  <span>อัพโหลดขึ้น Cloud</span>
+                </button>
+                <button onclick="manualSyncDownload()" class="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline ? 'disabled' : ''}>
+                  <span class="text-xl">📥</span>
+                  <span>ดาวน์โหลดจาก Cloud</span>
+                </button>
+              </div>
+
+              <!-- Firebase Info -->
+              <div class="bg-slate-700/30 rounded-xl p-3 mb-4">
+                <div class="text-xs text-slate-500 mb-1">Project ID</div>
+                <div class="text-sm text-slate-300 font-mono truncate">${getFirebaseConfig()?.projectId || '-'}</div>
+              </div>
+
+              <!-- Reset Button -->
+              <button onclick="confirmResetFirebase()" class="w-full p-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl transition-colors text-sm flex items-center justify-center gap-2">
+                <span>🔄</span>
+                <span>รีเซ็ตการตั้งค่า Firebase</span>
               </button>
             `}
           </div>
@@ -4154,7 +4194,7 @@
     };
     
     window.showFirebaseSetup = () => showFirebaseSetupModal();
-    
+
     window.resetFirebaseConfig = () => {
       showConfirm('รีเซ็ต Firebase?', 'ต้องการรีเซ็ตการตั้งค่า Cloud Sync?', () => {
         syncListeners.forEach(unsub => unsub());
@@ -4167,6 +4207,335 @@
         showToast('รีเซ็ตแล้ว', 'success');
         showFirebaseSetupModal();
       }, 'warning');
+    };
+
+    // ===== Enhanced Firebase Functions =====
+    window.manualSyncUpload = async () => {
+      if (!firebaseDb || !isOnline) {
+        showToast('ไม่สามารถเชื่อมต่อ Cloud ได้', 'error');
+        return;
+      }
+      showConfirm('📤 อัพโหลดข้อมูล', 'ข้อมูลในเครื่องจะถูกส่งไปแทนที่ข้อมูลบน Cloud ต้องการดำเนินการ?', async () => {
+        try {
+          isSyncing = true;
+          updateSyncStatus();
+          showToast('กำลังอัพโหลด...', 'info');
+
+          const updates = {};
+          SYNC_KEYS.forEach(key => {
+            const localData = localStorage.getItem(key);
+            if (localData) {
+              const dbKey = key.replace('ff_', '');
+              updates[dbKey] = JSON.parse(localData);
+            }
+          });
+
+          await firebaseDb.ref().update(updates);
+          showToast('✅ อัพโหลดสำเร็จ', 'success');
+        } catch (e) {
+          console.error('Upload error:', e);
+          showToast('อัพโหลดไม่สำเร็จ: ' + e.message, 'error');
+        } finally {
+          isSyncing = false;
+          updateSyncStatus();
+        }
+      }, 'warning');
+    };
+
+    window.manualSyncDownload = async () => {
+      if (!firebaseDb) {
+        showToast('ยังไม่ได้ตั้งค่า Firebase', 'error');
+        return;
+      }
+      showConfirm('📥 ดาวน์โหลดข้อมูล', '⚠️ ข้อมูลในเครื่องจะถูกแทนที่ด้วยข้อมูลจาก Cloud ต้องการดำเนินการ?', async () => {
+        try {
+          isSyncing = true;
+          updateSyncStatus();
+          showToast('กำลังดาวน์โหลด...', 'info');
+
+          const snapshot = await firebaseDb.ref().once('value');
+          const cloudData = snapshot.val();
+
+          if (cloudData) {
+            SYNC_KEYS.forEach(key => {
+              const dbKey = key.replace('ff_', '');
+              if (cloudData[dbKey]) {
+                localStorage.setItem(key, JSON.stringify(cloudData[dbKey]));
+              }
+            });
+            showToast('✅ ดาวน์โหลดสำเร็จ', 'success');
+            render();
+          } else {
+            showToast('ไม่มีข้อมูลบน Cloud', 'warning');
+          }
+        } catch (e) {
+          console.error('Download error:', e);
+          showToast('ดาวน์โหลดไม่สำเร็จ: ' + e.message, 'error');
+        } finally {
+          isSyncing = false;
+          updateSyncStatus();
+        }
+      }, 'warning');
+    };
+
+    window.confirmResetFirebase = () => {
+      showConfirm('🔄 รีเซ็ต Firebase', 'ต้องการรีเซ็ตการตั้งค่า Cloud Sync? ข้อมูลในเครื่องจะยังคงอยู่', () => {
+        syncListeners.forEach(unsub => unsub());
+        syncListeners = [];
+        localStorage.removeItem(FIREBASE_CONFIG_KEY);
+        localStorage.removeItem(LOCAL_ONLY_KEY);
+        firebaseApp = null;
+        firebaseDb = null;
+        isOnline = false;
+        updateSyncStatus();
+        showToast('รีเซ็ตแล้ว', 'success');
+        render();
+      }, 'warning');
+    };
+
+    // ===== Step-by-Step Firebase Setup Wizard =====
+    let wizardStep = 1;
+
+    window.showFirebaseSetupWizard = () => {
+      wizardStep = 1;
+      renderWizardStep();
+    };
+
+    const renderWizardStep = () => {
+      const existing = document.getElementById('firebase-wizard-modal');
+      if (existing) existing.remove();
+
+      const modal = document.createElement('div');
+      modal.id = 'firebase-wizard-modal';
+      modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
+
+      let content = '';
+
+      if (wizardStep === 1) {
+        content = `
+          <div class="text-center mb-6">
+            <div class="text-6xl mb-4">☁️</div>
+            <h2 class="text-xl font-bold text-cyan-400">ตั้งค่า Cloud Sync</h2>
+            <p class="text-slate-400 text-sm mt-2">Sync ข้อมูลข้ามอุปกรณ์ฟรี!</p>
+          </div>
+          <div class="space-y-3 mb-6">
+            <div class="flex items-start gap-3 p-3 bg-slate-700/50 rounded-xl">
+              <span class="text-green-400 text-xl">✓</span>
+              <div>
+                <div class="font-medium text-slate-200">ใช้ได้หลายเครื่อง</div>
+                <div class="text-xs text-slate-400">มือถือ, แท็บเล็ต, คอมพิวเตอร์</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-3 p-3 bg-slate-700/50 rounded-xl">
+              <span class="text-green-400 text-xl">✓</span>
+              <div>
+                <div class="font-medium text-slate-200">สำรองข้อมูลอัตโนมัติ</div>
+                <div class="text-xs text-slate-400">ไม่ต้องกลัวข้อมูลหาย</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-3 p-3 bg-slate-700/50 rounded-xl">
+              <span class="text-green-400 text-xl">✓</span>
+              <div>
+                <div class="font-medium text-slate-200">ฟรี 100%</div>
+                <div class="text-xs text-slate-400">ใช้ Firebase Realtime Database</div>
+              </div>
+            </div>
+          </div>
+          <button onclick="wizardStep=2;renderWizardStep()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold mb-3">
+            เริ่มตั้งค่า →
+          </button>
+          <button onclick="document.getElementById('firebase-wizard-modal').remove()" class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl text-sm">
+            ไว้ทีหลัง
+          </button>
+        `;
+      } else if (wizardStep === 2) {
+        content = `
+          <div class="text-center mb-4">
+            <div class="inline-flex items-center gap-2 px-3 py-1 bg-cyan-500/20 text-cyan-400 rounded-full text-sm mb-3">
+              ขั้นตอนที่ 1/3
+            </div>
+            <h2 class="text-lg font-bold text-white">สร้าง Firebase Project</h2>
+          </div>
+          <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-4">
+            <ol class="text-slate-300 space-y-3 text-sm">
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">1</span>
+                <span>เปิด <a href="https://console.firebase.google.com" target="_blank" class="text-cyan-400 underline font-medium">console.firebase.google.com</a></span>
+              </li>
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">2</span>
+                <span>กด <strong class="text-white">"Create a project"</strong></span>
+              </li>
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">3</span>
+                <span>ตั้งชื่อโปรเจค เช่น <strong class="text-white">"fish-farm"</strong></span>
+              </li>
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">4</span>
+                <span>ปิด Google Analytics (ไม่จำเป็น) → กด Create</span>
+              </li>
+            </ol>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="wizardStep=1;renderWizardStep()" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl">
+              ← กลับ
+            </button>
+            <button onclick="wizardStep=3;renderWizardStep()" class="flex-1 py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold">
+              ถัดไป →
+            </button>
+          </div>
+        `;
+      } else if (wizardStep === 3) {
+        content = `
+          <div class="text-center mb-4">
+            <div class="inline-flex items-center gap-2 px-3 py-1 bg-cyan-500/20 text-cyan-400 rounded-full text-sm mb-3">
+              ขั้นตอนที่ 2/3
+            </div>
+            <h2 class="text-lg font-bold text-white">สร้าง Realtime Database</h2>
+          </div>
+          <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-4">
+            <ol class="text-slate-300 space-y-3 text-sm">
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">1</span>
+                <span>เมนูซ้าย กด <strong class="text-white">Build → Realtime Database</strong></span>
+              </li>
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">2</span>
+                <span>กด <strong class="text-white">"Create Database"</strong></span>
+              </li>
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">3</span>
+                <span>เลือก Location → กด Next</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="bg-amber-500/30 text-amber-300 w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0">4</span>
+                <span>เลือก <strong class="text-green-400">"Start in test mode"</strong> → Enable</span>
+              </li>
+            </ol>
+          </div>
+          <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-3 mb-4 text-xs text-red-300">
+            ⚠️ ต้องเลือก "test mode" เท่านั้น ถึงจะใช้งานได้
+          </div>
+          <div class="flex gap-2">
+            <button onclick="wizardStep=2;renderWizardStep()" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl">
+              ← กลับ
+            </button>
+            <button onclick="wizardStep=4;renderWizardStep()" class="flex-1 py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold">
+              ถัดไป →
+            </button>
+          </div>
+        `;
+      } else if (wizardStep === 4) {
+        const savedConfig = getFirebaseConfig();
+        content = `
+          <div class="text-center mb-4">
+            <div class="inline-flex items-center gap-2 px-3 py-1 bg-cyan-500/20 text-cyan-400 rounded-full text-sm mb-3">
+              ขั้นตอนที่ 3/3
+            </div>
+            <h2 class="text-lg font-bold text-white">ใส่ข้อมูล Firebase</h2>
+          </div>
+          <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4 text-xs">
+            <p class="text-amber-300 mb-2">📋 วิธีหา Config:</p>
+            <p class="text-slate-400">Project Settings ⚙️ → Your apps → Web → Register app → Copy firebaseConfig</p>
+          </div>
+
+          <div class="space-y-3 mb-4">
+            <div>
+              <label class="block text-sm text-slate-300 mb-1">Database URL <span class="text-red-400">*</span></label>
+              <input type="url" id="wizard-dbUrl" placeholder="https://xxx.firebaseio.com"
+                value="${savedConfig?.databaseURL || ''}"
+                class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-sm focus:border-cyan-500 focus:outline-none">
+              <p class="text-xs text-slate-500 mt-1">หา URL ได้ที่หน้า Realtime Database</p>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-300 mb-1">API Key</label>
+              <input type="text" id="wizard-apiKey" placeholder="AIzaSy..."
+                value="${savedConfig?.apiKey || ''}"
+                class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-sm focus:border-cyan-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-sm text-slate-300 mb-1">Project ID</label>
+              <input type="text" id="wizard-projectId" placeholder="my-fish-farm"
+                value="${savedConfig?.projectId || ''}"
+                class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-sm focus:border-cyan-500 focus:outline-none">
+            </div>
+          </div>
+
+          <div class="bg-slate-700/50 rounded-xl p-3 mb-4">
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <span>หรือวาง JSON Config ทั้งหมด:</span>
+            </label>
+            <textarea id="wizard-jsonConfig" rows="3"
+              class="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-xs font-mono mt-2 focus:border-cyan-500 focus:outline-none"
+              placeholder='{"apiKey":"...","databaseURL":"...","projectId":"..."}'></textarea>
+          </div>
+
+          <button onclick="saveWizardConfig()" class="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold mb-3 flex items-center justify-center gap-2">
+            <span>✅</span>
+            <span>บันทึกและเชื่อมต่อ</span>
+          </button>
+          <button onclick="wizardStep=3;renderWizardStep()" class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl text-sm">
+            ← กลับ
+          </button>
+        `;
+      }
+
+      modal.innerHTML = `
+        <div class="bg-slate-800 rounded-2xl w-full max-w-md p-6 fade-in max-h-[90vh] overflow-y-auto">
+          ${content}
+        </div>
+      `;
+      document.body.appendChild(modal);
+    };
+
+    window.saveWizardConfig = () => {
+      let config = null;
+
+      // Try JSON first
+      const jsonInput = document.getElementById('wizard-jsonConfig')?.value?.trim();
+      if (jsonInput) {
+        try {
+          config = JSON.parse(jsonInput);
+        } catch (e) {
+          showToast('รูปแบบ JSON ไม่ถูกต้อง', 'error');
+          return;
+        }
+      } else {
+        const databaseURL = document.getElementById('wizard-dbUrl')?.value?.trim();
+        const apiKey = document.getElementById('wizard-apiKey')?.value?.trim();
+        const projectId = document.getElementById('wizard-projectId')?.value?.trim();
+
+        if (!databaseURL) {
+          showToast('กรุณากรอก Database URL', 'error');
+          document.getElementById('wizard-dbUrl')?.focus();
+          return;
+        }
+
+        if (!databaseURL.startsWith('https://') || !databaseURL.includes('.firebaseio.com')) {
+          showToast('Database URL ไม่ถูกต้อง ต้องเป็น https://xxx.firebaseio.com', 'error');
+          return;
+        }
+
+        config = { apiKey, databaseURL, projectId };
+      }
+
+      if (!config.databaseURL) {
+        showToast('ต้องระบุ Database URL', 'error');
+        return;
+      }
+
+      // Save and connect
+      localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
+      localStorage.removeItem(LOCAL_ONLY_KEY);
+
+      if (initFirebase(config)) {
+        document.getElementById('firebase-wizard-modal')?.remove();
+        setupFirebaseListeners();
+        showToast('✅ เชื่อมต่อ Firebase สำเร็จ!', 'success');
+        render();
+      } else {
+        showToast('เชื่อมต่อ Firebase ไม่สำเร็จ กรุณาตรวจสอบข้อมูล', 'error');
+      }
     };
     
     // Initialize Firebase on load
