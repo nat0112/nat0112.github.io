@@ -1,77 +1,858 @@
 /**
- * Fish Farm Pro - Firebase Sync Module
- * เพิ่มไฟล์นี้ก่อน </body> ในไฟล์ index.html หลังจาก Firebase SDK
+ * Fish Farm Pro - Multi-Provider Cloud Sync Module
+ * รองรับหลาย Database Providers
  */
 
-// ===== Firebase Configuration =====
-const FIREBASE_CONFIG_KEY = 'ff_firebase_config';
+// ===== Configuration =====
+const SYNC_CONFIG_KEY = 'ff_sync_config';
 const LOCAL_ONLY_KEY = 'ff_local_only';
+const OFFLINE_LOCK_KEY = 'ff_offline_lock'; // รหัสล็อค offline
 
-let firebaseApp = null;
-let firebaseDb = null;
+// Data keys to sync
+const SYNC_KEYS = [
+  'ff_ponds', 'ff_cycles', 'ff_feeds', 'ff_feed_stock',
+  'ff_supplements', 'ff_medicines', 'ff_feeding_logs',
+  'ff_water_quality', 'ff_expenses', 'ff_harvests',
+  'ff_mortalities', 'ff_fish_types'
+];
+
+// ===== Provider Definitions =====
+const PROVIDERS = {
+  firebase: {
+    id: 'firebase',
+    name: 'Firebase Realtime Database',
+    icon: '🔥',
+    description: 'Google Firebase - ฟรี 1GB',
+    fields: [
+      { key: 'apiKey', label: 'API Key', required: false },
+      { key: 'databaseURL', label: 'Database URL', required: true, placeholder: 'https://xxx.firebaseio.com' },
+      { key: 'projectId', label: 'Project ID', required: false }
+    ],
+    defaultConfig: {
+      apiKey: "AIzaSyBgdiGlQwcbgmu4An-xSNpdlg9gr8G_XlM",
+      databaseURL: "https://nat0112-7b220-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "nat0112-7b220"
+    }
+  },
+  firestore: {
+    id: 'firestore',
+    name: 'Firestore',
+    icon: '🗄️',
+    description: 'Firebase Firestore - NoSQL Document DB',
+    fields: [
+      { key: 'apiKey', label: 'API Key', required: true },
+      { key: 'projectId', label: 'Project ID', required: true },
+      { key: 'authDomain', label: 'Auth Domain', required: false }
+    ],
+    defaultConfig: null
+  },
+  supabase: {
+    id: 'supabase',
+    name: 'Supabase',
+    icon: '⚡',
+    description: 'Supabase - PostgreSQL + Realtime',
+    fields: [
+      { key: 'url', label: 'Project URL', required: true, placeholder: 'https://xxx.supabase.co' },
+      { key: 'anonKey', label: 'Anon Key', required: true }
+    ],
+    defaultConfig: null
+  },
+  pocketbase: {
+    id: 'pocketbase',
+    name: 'PocketBase',
+    icon: '📦',
+    description: 'PocketBase - Self-hosted Backend',
+    fields: [
+      { key: 'url', label: 'PocketBase URL', required: true, placeholder: 'https://your-pb.com' },
+      { key: 'collection', label: 'Collection Name', required: false, placeholder: 'fish_farm_data' }
+    ],
+    defaultConfig: null
+  },
+  mongodb: {
+    id: 'mongodb',
+    name: 'MongoDB Atlas',
+    icon: '🍃',
+    description: 'MongoDB Atlas Data API',
+    fields: [
+      { key: 'endpoint', label: 'Data API Endpoint', required: true },
+      { key: 'apiKey', label: 'API Key', required: true },
+      { key: 'database', label: 'Database Name', required: true },
+      { key: 'dataSource', label: 'Data Source', required: true }
+    ],
+    defaultConfig: null
+  },
+  googlesheets: {
+    id: 'googlesheets',
+    name: 'Google Sheets',
+    icon: '📊',
+    description: 'Google Sheets API - Spreadsheet Storage',
+    fields: [
+      { key: 'sheetId', label: 'Spreadsheet ID', required: true },
+      { key: 'apiKey', label: 'API Key', required: true }
+    ],
+    defaultConfig: null
+  },
+  restapi: {
+    id: 'restapi',
+    name: 'Custom REST API',
+    icon: '🔌',
+    description: 'สำหรับ PlanetScale, DynamoDB, D1, etc.',
+    fields: [
+      { key: 'baseUrl', label: 'API Base URL', required: true, placeholder: 'https://your-api.com' },
+      { key: 'apiKey', label: 'API Key/Token', required: false },
+      { key: 'headers', label: 'Custom Headers (JSON)', required: false, type: 'textarea' }
+    ],
+    defaultConfig: null
+  }
+};
+
+// ===== State =====
+let currentProvider = null;
+let providerInstance = null;
 let isOnline = false;
 let isSyncing = false;
 let syncListeners = [];
 
-// Data keys to sync
-const SYNC_KEYS = [
-  'ff_ponds',
-  'ff_cycles', 
-  'ff_feeds',
-  'ff_feed_stock',
-  'ff_supplements',
-  'ff_medicines',
-  'ff_feeding_logs',
-  'ff_water_quality',
-  'ff_expenses',
-  'ff_harvests',
-  'ff_mortalities',
-  'ff_fish_types'
-];
+// ===== Provider Adapters =====
+const adapters = {
+  // Firebase Realtime Database Adapter
+  firebase: {
+    app: null,
+    db: null,
 
-// ===== Firebase Helpers =====
-const getFirebaseConfig = () => {
+    async init(config) {
+      if (typeof firebase === 'undefined') {
+        console.error('Firebase SDK not loaded');
+        return false;
+      }
+
+      if (!config.databaseURL) {
+        console.error('Firebase config missing databaseURL');
+        return false;
+      }
+
+      try {
+        if (!this.app) {
+          this.app = firebase.initializeApp(config);
+          this.db = firebase.database();
+        }
+
+        // Monitor connection
+        this.db.ref('.info/connected').on('value', (snap) => {
+          const wasOnline = isOnline;
+          isOnline = snap.val() === true;
+          updateSyncStatus();
+
+          if (isOnline && !wasOnline) {
+            showToast('เชื่อมต่อ Cloud สำเร็จ', 'success');
+            this.syncToCloud();
+          }
+        });
+
+        return true;
+      } catch (e) {
+        console.error('Firebase init error:', e);
+        return false;
+      }
+    },
+
+    async syncToCloud() {
+      if (!this.db || !isOnline) return;
+
+      try {
+        const updates = {};
+        SYNC_KEYS.forEach(key => {
+          const data = localStorage.getItem(key);
+          if (data) {
+            updates[key.replace('ff_', '')] = JSON.parse(data);
+          }
+        });
+        await this.db.ref().update(updates);
+        console.log('Firebase: synced to cloud');
+      } catch (e) {
+        console.error('Firebase sync error:', e);
+      }
+    },
+
+    async syncFromCloud() {
+      if (!this.db) return;
+
+      try {
+        const snapshot = await this.db.ref().once('value');
+        const data = snapshot.val();
+        if (data) {
+          SYNC_KEYS.forEach(key => {
+            const dbKey = key.replace('ff_', '');
+            if (data[dbKey]) {
+              localStorage.setItem(key, JSON.stringify(data[dbKey]));
+            }
+          });
+        }
+        console.log('Firebase: synced from cloud');
+      } catch (e) {
+        console.error('Firebase sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      if (!this.db) return;
+
+      SYNC_KEYS.forEach(key => {
+        const dbKey = key.replace('ff_', '');
+        const ref = this.db.ref(dbKey);
+
+        const listener = ref.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data !== null) {
+            const local = localStorage.getItem(key);
+            const cloud = JSON.stringify(data);
+            if (local !== cloud) {
+              localStorage.setItem(key, cloud);
+              onChange?.();
+            }
+          }
+        });
+
+        syncListeners.push(() => ref.off('value', listener));
+      });
+    },
+
+    async set(key, data) {
+      if (!this.db || !isOnline) return;
+      const dbKey = key.replace('ff_', '');
+      await this.db.ref(dbKey).set(data);
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.app = null;
+      this.db = null;
+    }
+  },
+
+  // Firestore Adapter
+  firestore: {
+    app: null,
+    db: null,
+
+    async init(config) {
+      if (typeof firebase === 'undefined') {
+        console.error('Firebase SDK not loaded');
+        return false;
+      }
+
+      try {
+        if (!this.app) {
+          this.app = firebase.initializeApp(config);
+          this.db = firebase.firestore();
+        }
+        isOnline = true;
+        updateSyncStatus();
+        return true;
+      } catch (e) {
+        console.error('Firestore init error:', e);
+        return false;
+      }
+    },
+
+    async syncToCloud() {
+      if (!this.db) return;
+
+      try {
+        const batch = this.db.batch();
+        SYNC_KEYS.forEach(key => {
+          const data = localStorage.getItem(key);
+          if (data) {
+            const docRef = this.db.collection('fish_farm').doc(key);
+            batch.set(docRef, { data: JSON.parse(data), updatedAt: new Date() });
+          }
+        });
+        await batch.commit();
+        console.log('Firestore: synced to cloud');
+      } catch (e) {
+        console.error('Firestore sync error:', e);
+      }
+    },
+
+    async syncFromCloud() {
+      if (!this.db) return;
+
+      try {
+        const snapshot = await this.db.collection('fish_farm').get();
+        snapshot.forEach(doc => {
+          const key = doc.id;
+          if (SYNC_KEYS.includes(key) && doc.data().data) {
+            localStorage.setItem(key, JSON.stringify(doc.data().data));
+          }
+        });
+        console.log('Firestore: synced from cloud');
+      } catch (e) {
+        console.error('Firestore sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      if (!this.db) return;
+
+      const unsubscribe = this.db.collection('fish_farm').onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'modified' || change.type === 'added') {
+            const key = change.doc.id;
+            if (SYNC_KEYS.includes(key) && change.doc.data().data) {
+              localStorage.setItem(key, JSON.stringify(change.doc.data().data));
+              onChange?.();
+            }
+          }
+        });
+      });
+
+      syncListeners.push(unsubscribe);
+    },
+
+    async set(key, data) {
+      if (!this.db) return;
+      await this.db.collection('fish_farm').doc(key).set({
+        data,
+        updatedAt: new Date()
+      });
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.app = null;
+      this.db = null;
+    }
+  },
+
+  // Supabase Adapter
+  supabase: {
+    client: null,
+
+    async init(config) {
+      if (typeof supabase === 'undefined') {
+        console.error('Supabase SDK not loaded. Add: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>');
+        return false;
+      }
+
+      try {
+        this.client = supabase.createClient(config.url, config.anonKey);
+        isOnline = true;
+        updateSyncStatus();
+        showToast('เชื่อมต่อ Supabase สำเร็จ', 'success');
+        return true;
+      } catch (e) {
+        console.error('Supabase init error:', e);
+        return false;
+      }
+    },
+
+    async syncToCloud() {
+      if (!this.client) return;
+
+      try {
+        for (const key of SYNC_KEYS) {
+          const data = localStorage.getItem(key);
+          if (data) {
+            await this.client
+              .from('fish_farm_sync')
+              .upsert({
+                key,
+                data: JSON.parse(data),
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'key' });
+          }
+        }
+        console.log('Supabase: synced to cloud');
+      } catch (e) {
+        console.error('Supabase sync error:', e);
+      }
+    },
+
+    async syncFromCloud() {
+      if (!this.client) return;
+
+      try {
+        const { data, error } = await this.client
+          .from('fish_farm_sync')
+          .select('*');
+
+        if (error) throw error;
+
+        data?.forEach(row => {
+          if (SYNC_KEYS.includes(row.key)) {
+            localStorage.setItem(row.key, JSON.stringify(row.data));
+          }
+        });
+        console.log('Supabase: synced from cloud');
+      } catch (e) {
+        console.error('Supabase sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      if (!this.client) return;
+
+      const channel = this.client
+        .channel('fish_farm_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'fish_farm_sync' },
+          (payload) => {
+            if (payload.new && SYNC_KEYS.includes(payload.new.key)) {
+              localStorage.setItem(payload.new.key, JSON.stringify(payload.new.data));
+              onChange?.();
+            }
+          }
+        )
+        .subscribe();
+
+      syncListeners.push(() => channel.unsubscribe());
+    },
+
+    async set(key, data) {
+      if (!this.client) return;
+      await this.client
+        .from('fish_farm_sync')
+        .upsert({ key, data, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.client = null;
+    }
+  },
+
+  // PocketBase Adapter
+  pocketbase: {
+    client: null,
+    collection: 'fish_farm_data',
+
+    async init(config) {
+      if (typeof PocketBase === 'undefined') {
+        console.error('PocketBase SDK not loaded. Add: <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.21.1/dist/pocketbase.umd.js"></script>');
+        return false;
+      }
+
+      try {
+        this.client = new PocketBase(config.url);
+        this.collection = config.collection || 'fish_farm_data';
+        isOnline = true;
+        updateSyncStatus();
+        showToast('เชื่อมต่อ PocketBase สำเร็จ', 'success');
+        return true;
+      } catch (e) {
+        console.error('PocketBase init error:', e);
+        return false;
+      }
+    },
+
+    async syncToCloud() {
+      if (!this.client) return;
+
+      try {
+        for (const key of SYNC_KEYS) {
+          const data = localStorage.getItem(key);
+          if (data) {
+            try {
+              const existing = await this.client.collection(this.collection).getFirstListItem(`key="${key}"`);
+              await this.client.collection(this.collection).update(existing.id, { key, data: JSON.parse(data) });
+            } catch {
+              await this.client.collection(this.collection).create({ key, data: JSON.parse(data) });
+            }
+          }
+        }
+        console.log('PocketBase: synced to cloud');
+      } catch (e) {
+        console.error('PocketBase sync error:', e);
+      }
+    },
+
+    async syncFromCloud() {
+      if (!this.client) return;
+
+      try {
+        const records = await this.client.collection(this.collection).getFullList();
+        records.forEach(record => {
+          if (SYNC_KEYS.includes(record.key)) {
+            localStorage.setItem(record.key, JSON.stringify(record.data));
+          }
+        });
+        console.log('PocketBase: synced from cloud');
+      } catch (e) {
+        console.error('PocketBase sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      if (!this.client) return;
+
+      this.client.collection(this.collection).subscribe('*', (e) => {
+        if (e.record && SYNC_KEYS.includes(e.record.key)) {
+          localStorage.setItem(e.record.key, JSON.stringify(e.record.data));
+          onChange?.();
+        }
+      });
+
+      syncListeners.push(() => this.client.collection(this.collection).unsubscribe());
+    },
+
+    async set(key, data) {
+      if (!this.client) return;
+      try {
+        const existing = await this.client.collection(this.collection).getFirstListItem(`key="${key}"`);
+        await this.client.collection(this.collection).update(existing.id, { key, data });
+      } catch {
+        await this.client.collection(this.collection).create({ key, data });
+      }
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.client = null;
+    }
+  },
+
+  // MongoDB Atlas Data API Adapter
+  mongodb: {
+    config: null,
+
+    async init(config) {
+      this.config = config;
+      try {
+        // Test connection
+        const response = await fetch(`${config.endpoint}/action/findOne`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': config.apiKey
+          },
+          body: JSON.stringify({
+            dataSource: config.dataSource,
+            database: config.database,
+            collection: 'fish_farm_sync',
+            filter: { _id: 'test' }
+          })
+        });
+
+        if (response.ok) {
+          isOnline = true;
+          updateSyncStatus();
+          showToast('เชื่อมต่อ MongoDB Atlas สำเร็จ', 'success');
+          return true;
+        }
+        return false;
+      } catch (e) {
+        console.error('MongoDB init error:', e);
+        return false;
+      }
+    },
+
+    async syncToCloud() {
+      if (!this.config) return;
+
+      try {
+        for (const key of SYNC_KEYS) {
+          const data = localStorage.getItem(key);
+          if (data) {
+            await fetch(`${this.config.endpoint}/action/updateOne`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'api-key': this.config.apiKey
+              },
+              body: JSON.stringify({
+                dataSource: this.config.dataSource,
+                database: this.config.database,
+                collection: 'fish_farm_sync',
+                filter: { key },
+                update: { $set: { key, data: JSON.parse(data), updatedAt: new Date() } },
+                upsert: true
+              })
+            });
+          }
+        }
+        console.log('MongoDB: synced to cloud');
+      } catch (e) {
+        console.error('MongoDB sync error:', e);
+      }
+    },
+
+    async syncFromCloud() {
+      if (!this.config) return;
+
+      try {
+        const response = await fetch(`${this.config.endpoint}/action/find`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': this.config.apiKey
+          },
+          body: JSON.stringify({
+            dataSource: this.config.dataSource,
+            database: this.config.database,
+            collection: 'fish_farm_sync',
+            filter: {}
+          })
+        });
+
+        const result = await response.json();
+        result.documents?.forEach(doc => {
+          if (SYNC_KEYS.includes(doc.key)) {
+            localStorage.setItem(doc.key, JSON.stringify(doc.data));
+          }
+        });
+        console.log('MongoDB: synced from cloud');
+      } catch (e) {
+        console.error('MongoDB sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      // MongoDB Data API doesn't support realtime - poll every 30s
+      const interval = setInterval(async () => {
+        await this.syncFromCloud();
+        onChange?.();
+      }, 30000);
+
+      syncListeners.push(() => clearInterval(interval));
+    },
+
+    async set(key, data) {
+      if (!this.config) return;
+      await fetch(`${this.config.endpoint}/action/updateOne`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': this.config.apiKey
+        },
+        body: JSON.stringify({
+          dataSource: this.config.dataSource,
+          database: this.config.database,
+          collection: 'fish_farm_sync',
+          filter: { key },
+          update: { $set: { key, data, updatedAt: new Date() } },
+          upsert: true
+        })
+      });
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.config = null;
+    }
+  },
+
+  // Google Sheets Adapter
+  googlesheets: {
+    config: null,
+
+    async init(config) {
+      this.config = config;
+      try {
+        const response = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${config.sheetId}?key=${config.apiKey}`
+        );
+
+        if (response.ok) {
+          isOnline = true;
+          updateSyncStatus();
+          showToast('เชื่อมต่อ Google Sheets สำเร็จ', 'success');
+          return true;
+        }
+        return false;
+      } catch (e) {
+        console.error('Google Sheets init error:', e);
+        return false;
+      }
+    },
+
+    async syncToCloud() {
+      // Note: Writing requires OAuth, not just API key
+      console.warn('Google Sheets write requires OAuth authentication');
+    },
+
+    async syncFromCloud() {
+      if (!this.config) return;
+
+      try {
+        const response = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${this.config.sheetId}/values/A:B?key=${this.config.apiKey}`
+        );
+
+        const result = await response.json();
+        result.values?.forEach(([key, data]) => {
+          if (SYNC_KEYS.includes(key) && data) {
+            try {
+              localStorage.setItem(key, data);
+            } catch (e) {}
+          }
+        });
+        console.log('Google Sheets: synced from cloud');
+      } catch (e) {
+        console.error('Google Sheets sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      // Poll every 60s
+      const interval = setInterval(async () => {
+        await this.syncFromCloud();
+        onChange?.();
+      }, 60000);
+
+      syncListeners.push(() => clearInterval(interval));
+    },
+
+    async set(key, data) {
+      console.warn('Google Sheets write requires OAuth');
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.config = null;
+    }
+  },
+
+  // Generic REST API Adapter
+  restapi: {
+    config: null,
+
+    async init(config) {
+      this.config = config;
+      try {
+        let headers = { 'Content-Type': 'application/json' };
+        if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+        if (config.headers) {
+          try {
+            Object.assign(headers, JSON.parse(config.headers));
+          } catch {}
+        }
+        this.headers = headers;
+
+        const response = await fetch(`${config.baseUrl}/health`, { headers });
+        isOnline = response.ok;
+        updateSyncStatus();
+        if (isOnline) showToast('เชื่อมต่อ API สำเร็จ', 'success');
+        return isOnline;
+      } catch (e) {
+        // Assume online if no health endpoint
+        isOnline = true;
+        updateSyncStatus();
+        return true;
+      }
+    },
+
+    async syncToCloud() {
+      if (!this.config) return;
+
+      try {
+        const allData = {};
+        SYNC_KEYS.forEach(key => {
+          const data = localStorage.getItem(key);
+          if (data) allData[key] = JSON.parse(data);
+        });
+
+        await fetch(`${this.config.baseUrl}/sync`, {
+          method: 'POST',
+          headers: this.headers,
+          body: JSON.stringify(allData)
+        });
+        console.log('REST API: synced to cloud');
+      } catch (e) {
+        console.error('REST API sync error:', e);
+      }
+    },
+
+    async syncFromCloud() {
+      if (!this.config) return;
+
+      try {
+        const response = await fetch(`${this.config.baseUrl}/sync`, {
+          headers: this.headers
+        });
+
+        const data = await response.json();
+        Object.entries(data).forEach(([key, value]) => {
+          if (SYNC_KEYS.includes(key)) {
+            localStorage.setItem(key, JSON.stringify(value));
+          }
+        });
+        console.log('REST API: synced from cloud');
+      } catch (e) {
+        console.error('REST API sync error:', e);
+      }
+    },
+
+    setupListeners(onChange) {
+      // Poll every 30s
+      const interval = setInterval(async () => {
+        await this.syncFromCloud();
+        onChange?.();
+      }, 30000);
+
+      syncListeners.push(() => clearInterval(interval));
+    },
+
+    async set(key, data) {
+      if (!this.config) return;
+      await fetch(`${this.config.baseUrl}/sync/${key}`, {
+        method: 'PUT',
+        headers: this.headers,
+        body: JSON.stringify(data)
+      });
+    },
+
+    destroy() {
+      syncListeners.forEach(unsub => unsub());
+      syncListeners = [];
+      this.config = null;
+    }
+  }
+};
+
+// ===== Config Management =====
+const getSyncConfig = () => {
   try {
-    const config = localStorage.getItem(FIREBASE_CONFIG_KEY);
-    return config ? JSON.parse(config) : null;
+    const config = localStorage.getItem(SYNC_CONFIG_KEY);
+    if (config) return JSON.parse(config);
+
+    // ค่าเริ่มต้น: Firebase
+    return {
+      provider: 'firebase',
+      config: PROVIDERS.firebase.defaultConfig
+    };
   } catch (e) {
     return null;
   }
 };
 
+const saveSyncConfig = (provider, config) => {
+  localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify({ provider, config }));
+  localStorage.removeItem(LOCAL_ONLY_KEY);
+};
+
 const isLocalOnly = () => localStorage.getItem(LOCAL_ONLY_KEY) === 'true';
+const isOfflineLocked = () => !!localStorage.getItem(OFFLINE_LOCK_KEY);
 
-const initFirebase = (config) => {
-  try {
-    if (firebaseApp) return true;
-    
-    // Validate config
-    if (!config.databaseURL) {
-      console.error('Firebase config missing databaseURL');
-      return false;
-    }
-
-    firebaseApp = firebase.initializeApp(config);
-    firebaseDb = firebase.database();
-    
-    // Monitor connection state
-    firebaseDb.ref('.info/connected').on('value', (snap) => {
-      const wasOnline = isOnline;
-      isOnline = snap.val() === true;
-      updateSyncStatus();
-      
-      if (isOnline && !wasOnline) {
-        showToast('เชื่อมต่อ Cloud สำเร็จ', 'success');
-        // Sync local data to cloud on reconnect
-        syncLocalToCloud();
-      }
-    });
-
-    return true;
-  } catch (e) {
-    console.error('Firebase init error:', e);
-    return false;
+// Simple hash function for password
+const hashPassword = (password) => {
+  let hash = 0;
+  for (let i = 0; i < password.length; i++) {
+    const char = password.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
   }
+  return 'lock_' + Math.abs(hash).toString(36);
+};
+
+const verifyOfflineLock = (password) => {
+  const stored = localStorage.getItem(OFFLINE_LOCK_KEY);
+  return stored === hashPassword(password);
 };
 
 // ===== Sync Status UI =====
@@ -86,9 +867,10 @@ const createSyncStatusUI = () => {
     <span id="sync-icon">●</span>
     <span id="sync-text">Offline</span>
   `;
+  indicator.onclick = () => showSyncSetupModal();
+  indicator.style.cursor = 'pointer';
   document.body.appendChild(indicator);
 
-  // Add styles if not exists
   if (!document.getElementById('sync-styles')) {
     const style = document.createElement('style');
     style.id = 'sync-styles';
@@ -124,11 +906,17 @@ const updateSyncStatus = () => {
 
   const icon = document.getElementById('sync-icon');
   const text = document.getElementById('sync-text');
+  const provider = PROVIDERS[currentProvider];
 
   if (isLocalOnly()) {
     indicator.className = 'sync-indicator sync-local';
-    icon.textContent = '○';
-    text.textContent = 'Local Only';
+    if (isOfflineLocked()) {
+      icon.textContent = '🔒';
+      text.textContent = 'Offline (ล็อค)';
+    } else {
+      icon.textContent = '○';
+      text.textContent = 'Local Only';
+    }
   } else if (isSyncing) {
     indicator.className = 'sync-indicator sync-syncing';
     icon.innerHTML = '↻';
@@ -136,9 +924,9 @@ const updateSyncStatus = () => {
     text.textContent = 'Syncing...';
   } else if (isOnline) {
     indicator.className = 'sync-indicator sync-online';
-    icon.textContent = '●';
+    icon.textContent = provider?.icon || '●';
     icon.className = '';
-    text.textContent = 'Online';
+    text.textContent = provider?.name || 'Online';
   } else {
     indicator.className = 'sync-indicator sync-offline';
     icon.textContent = '●';
@@ -147,301 +935,408 @@ const updateSyncStatus = () => {
   }
 };
 
-// ===== Data Sync Functions =====
-const syncLocalToCloud = async () => {
-  if (!firebaseDb || !isOnline || isLocalOnly()) return;
-
-  isSyncing = true;
-  updateSyncStatus();
-
-  try {
-    const updates = {};
-    
-    SYNC_KEYS.forEach(key => {
-      const localData = localStorage.getItem(key);
-      if (localData) {
-        const dbKey = key.replace('ff_', '');
-        updates[dbKey] = JSON.parse(localData);
-      }
-    });
-
-    await firebaseDb.ref().update(updates);
-    console.log('Local data synced to cloud');
-  } catch (e) {
-    console.error('Sync to cloud error:', e);
-  }
-
-  isSyncing = false;
-  updateSyncStatus();
-};
-
-const syncCloudToLocal = async () => {
-  if (!firebaseDb || isLocalOnly()) return;
-
-  isSyncing = true;
-  updateSyncStatus();
-
-  try {
-    const snapshot = await firebaseDb.ref().once('value');
-    const cloudData = snapshot.val();
-
-    if (cloudData) {
-      SYNC_KEYS.forEach(key => {
-        const dbKey = key.replace('ff_', '');
-        if (cloudData[dbKey]) {
-          localStorage.setItem(key, JSON.stringify(cloudData[dbKey]));
-        }
-      });
-      console.log('Cloud data synced to local');
-    }
-  } catch (e) {
-    console.error('Sync from cloud error:', e);
-  }
-
-  isSyncing = false;
-  updateSyncStatus();
-};
-
-const setupFirebaseListeners = () => {
-  if (!firebaseDb || isLocalOnly()) return;
-
-  // Clear existing listeners
-  syncListeners.forEach(unsub => unsub());
-  syncListeners = [];
-
-  SYNC_KEYS.forEach(key => {
-    const dbKey = key.replace('ff_', '');
-    const ref = firebaseDb.ref(dbKey);
-    
-    const listener = ref.on('value', (snapshot) => {
-      const data = snapshot.val();
-      if (data !== null) {
-        // Compare with local data to avoid unnecessary updates
-        const localData = localStorage.getItem(key);
-        const cloudDataStr = JSON.stringify(data);
-        
-        if (localData !== cloudDataStr) {
-          localStorage.setItem(key, cloudDataStr);
-          // Re-render if app is ready
-          if (window.render && window.appReady) {
-            window.render();
-          }
-        }
-      }
-    });
-
-    syncListeners.push(() => ref.off('value', listener));
-  });
-};
-
-// ===== Enhanced Storage with Sync =====
-const originalStorageSet = window.storage?.set;
-
-const enhanceStorageWithSync = () => {
-  if (!window.storage) return;
-
-  const originalSet = window.storage.set;
-  
-  window.storage.set = (key, data) => {
-    // Call original localStorage set
-    const result = originalSet.call(window.storage, key, data);
-    
-    // Sync to Firebase if connected and not local-only
-    if (firebaseDb && isOnline && !isLocalOnly() && SYNC_KEYS.includes(key)) {
-      const dbKey = key.replace('ff_', '');
-      firebaseDb.ref(dbKey).set(data).catch(err => {
-        console.error('Firebase sync error:', err);
-      });
-    }
-    
-    return result;
-  };
-};
-
-// ===== Firebase Setup Modal =====
-const showFirebaseSetupModal = () => {
-  const existingModal = document.getElementById('firebase-setup-modal');
-  if (existingModal) {
-    existingModal.style.display = 'flex';
+// ===== Setup Modal =====
+const showSyncSetupModal = () => {
+  // ถ้าล็อค offline อยู่ ต้องใส่รหัสผ่านก่อน
+  if (isOfflineLocked() && isLocalOnly()) {
+    showUnlockModal();
     return;
   }
 
+  const existingModal = document.getElementById('sync-setup-modal');
+  if (existingModal) existingModal.remove();
+
+  const savedConfig = getSyncConfig();
+  const currentProviderId = savedConfig?.provider || 'firebase';
+
   const modal = document.createElement('div');
-  modal.id = 'firebase-setup-modal';
+  modal.id = 'sync-setup-modal';
   modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
   modal.innerHTML = `
-    <div class="bg-slate-800 rounded-2xl w-full max-w-md p-6 fade-in max-h-[90vh] overflow-y-auto">
+    <div class="bg-slate-800 rounded-2xl w-full max-w-lg p-6 fade-in max-h-[90vh] overflow-y-auto">
       <div class="text-center mb-6">
-        <div class="text-5xl mb-3">🐟☁️</div>
-        <h2 class="text-xl font-bold text-cyan-400">ตั้งค่า Firebase</h2>
-        <p class="text-slate-400 text-sm mt-2">เพื่อ sync ข้อมูลข้ามอุปกรณ์</p>
+        <div class="text-4xl mb-2">☁️</div>
+        <h2 class="text-xl font-bold text-cyan-400">ตั้งค่า Cloud Sync</h2>
+        <p class="text-slate-400 text-sm mt-1">เลือก Database Provider</p>
       </div>
 
-      <div class="space-y-4">
-        <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-sm">
-          <div class="font-semibold text-amber-400 mb-2">📋 วิธีสร้าง Firebase (ฟรี)</div>
-          <ol class="text-slate-300 space-y-1 list-decimal list-inside text-xs">
-            <li>ไปที่ <a href="https://console.firebase.google.com" target="_blank" class="text-cyan-400 underline">console.firebase.google.com</a></li>
-            <li>สร้างโปรเจคใหม่</li>
-            <li>ไปที่ Build → Realtime Database → Create Database</li>
-            <li>เลือก Start in <strong>test mode</strong></li>
-            <li>ไปที่ Project Settings ⚙️ → Your apps → Web</li>
-            <li>ลงทะเบียนแอพ แล้ว copy firebaseConfig</li>
-          </ol>
-        </div>
+      <!-- Provider Selection -->
+      <div class="grid grid-cols-2 gap-2 mb-4" id="provider-grid">
+        ${Object.values(PROVIDERS).map(p => `
+          <button onclick="selectProvider('${p.id}')"
+            class="provider-btn p-3 rounded-xl border-2 transition-all text-left ${p.id === currentProviderId ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-600 hover:border-slate-500'}"
+            data-provider="${p.id}">
+            <div class="text-2xl mb-1">${p.icon}</div>
+            <div class="text-sm font-medium text-slate-200">${p.name}</div>
+            <div class="text-xs text-slate-400">${p.description}</div>
+          </button>
+        `).join('')}
+      </div>
 
-        <div>
-          <label class="block text-sm text-slate-300 mb-2">Firebase Config (JSON)</label>
-          <textarea id="firebase-config-input" rows="6" 
-            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-sm font-mono text-slate-100"
-            placeholder='{
-  "apiKey": "xxx",
-  "databaseURL": "https://xxx.firebaseio.com",
-  "projectId": "xxx"
-}'></textarea>
-        </div>
+      <!-- Config Fields -->
+      <div id="provider-config" class="space-y-3 mb-4">
+        <!-- Fields will be injected here -->
+      </div>
 
-        <div class="bg-slate-700/50 rounded-xl p-4">
-          <label class="block text-sm text-slate-300 mb-2">หรือกรอกแยกทีละช่อง:</label>
-          <div class="space-y-2">
-            <input type="text" id="fb-apiKey" placeholder="API Key" class="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-sm text-slate-100">
-            <input type="text" id="fb-databaseURL" placeholder="Database URL (https://xxx.firebaseio.com)" class="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-sm text-slate-100">
-            <input type="text" id="fb-projectId" placeholder="Project ID" class="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-sm text-slate-100">
-          </div>
-        </div>
-
-        <button onclick="saveFirebaseConfig()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold transition-colors">
+      <!-- Actions -->
+      <div class="space-y-2">
+        <button onclick="saveAndConnect()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold transition-colors">
           💾 บันทึกและเชื่อมต่อ
         </button>
-
-        <button onclick="useLocalOnly()" class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
-          ใช้งานแบบ Offline เท่านั้น (ไม่ sync)
+        <button onclick="useLocalOnly()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
+          ใช้งานแบบ Offline เท่านั้น
+        </button>
+        <button onclick="closeSyncModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
+          ยกเลิก
         </button>
       </div>
     </div>
   `;
   document.body.appendChild(modal);
+
+  // Initialize with current provider
+  selectProvider(currentProviderId);
 };
 
-const hideFirebaseSetupModal = () => {
-  const modal = document.getElementById('firebase-setup-modal');
-  if (modal) {
-    modal.style.display = 'none';
-  }
+window.selectProvider = (providerId) => {
+  const provider = PROVIDERS[providerId];
+  if (!provider) return;
+
+  // Update selection UI
+  document.querySelectorAll('.provider-btn').forEach(btn => {
+    if (btn.dataset.provider === providerId) {
+      btn.classList.add('border-cyan-500', 'bg-cyan-500/10');
+      btn.classList.remove('border-slate-600');
+    } else {
+      btn.classList.remove('border-cyan-500', 'bg-cyan-500/10');
+      btn.classList.add('border-slate-600');
+    }
+  });
+
+  // Get saved config for this provider
+  const savedConfig = getSyncConfig();
+  const config = savedConfig?.provider === providerId ? savedConfig.config : (provider.defaultConfig || {});
+
+  // Render config fields
+  const configDiv = document.getElementById('provider-config');
+  configDiv.innerHTML = `
+    <input type="hidden" id="selected-provider" value="${providerId}">
+    ${provider.fields.map(field => `
+      <div>
+        <label class="block text-sm text-slate-300 mb-1">
+          ${field.label} ${field.required ? '<span class="text-red-400">*</span>' : ''}
+        </label>
+        ${field.type === 'textarea'
+          ? `<textarea id="field-${field.key}" rows="3"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100"
+              placeholder="${field.placeholder || ''}">${config[field.key] || ''}</textarea>`
+          : `<input type="text" id="field-${field.key}"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100"
+              placeholder="${field.placeholder || ''}"
+              value="${config[field.key] || ''}">`
+        }
+      </div>
+    `).join('')}
+  `;
 };
 
-// ===== Global Functions =====
-window.saveFirebaseConfig = () => {
-  let config = null;
+window.saveAndConnect = async () => {
+  const providerId = document.getElementById('selected-provider')?.value;
+  const provider = PROVIDERS[providerId];
+  if (!provider) return;
 
-  // Try JSON input first
-  const jsonInput = document.getElementById('firebase-config-input')?.value?.trim();
-  if (jsonInput) {
-    try {
-      config = JSON.parse(jsonInput);
-    } catch (e) {
-      showToast('รูปแบบ JSON ไม่ถูกต้อง', 'error');
+  // Collect config
+  const config = {};
+  for (const field of provider.fields) {
+    const el = document.getElementById(`field-${field.key}`);
+    const value = el?.value?.trim();
+    if (field.required && !value) {
+      showToast(`กรุณากรอก ${field.label}`, 'error');
       return;
     }
-  } else {
-    // Try individual fields
-    const apiKey = document.getElementById('fb-apiKey')?.value?.trim();
-    const databaseURL = document.getElementById('fb-databaseURL')?.value?.trim();
-    const projectId = document.getElementById('fb-projectId')?.value?.trim();
-
-    if (!databaseURL) {
-      showToast('กรุณากรอก Database URL', 'error');
-      return;
-    }
-
-    config = { apiKey, databaseURL, projectId };
-  }
-
-  // Validate required fields
-  if (!config.databaseURL) {
-    showToast('ต้องระบุ Database URL', 'error');
-    return;
+    if (value) config[field.key] = value;
   }
 
   // Save config
-  localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
-  localStorage.removeItem(LOCAL_ONLY_KEY);
+  saveSyncConfig(providerId, config);
 
-  // Initialize
-  if (initFirebase(config)) {
-    hideFirebaseSetupModal();
-    setupFirebaseListeners();
-    syncCloudToLocal().then(() => {
+  // Initialize provider
+  const adapter = adapters[providerId];
+  if (adapter) {
+    // Destroy previous
+    if (providerInstance) {
+      providerInstance.destroy?.();
+    }
+
+    currentProvider = providerId;
+    providerInstance = adapter;
+
+    if (await adapter.init(config)) {
+      adapter.setupListeners?.(() => {
+        if (window.render) window.render();
+      });
+      await adapter.syncFromCloud();
+      closeSyncModal();
       if (window.render) window.render();
-    });
-  } else {
-    showToast('เชื่อมต่อ Firebase ไม่สำเร็จ', 'error');
+    } else {
+      showToast('เชื่อมต่อไม่สำเร็จ', 'error');
+    }
   }
 };
 
 window.useLocalOnly = () => {
+  showOfflineLockModal();
+};
+
+// ===== Offline Lock Modal =====
+const showOfflineLockModal = () => {
+  closeSyncModal();
+
+  const modal = document.createElement('div');
+  modal.id = 'offline-lock-modal';
+  modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
+  modal.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-sm p-6 fade-in">
+      <div class="text-center mb-6">
+        <div class="text-5xl mb-3">🔒</div>
+        <h2 class="text-xl font-bold text-amber-400">ล็อค Offline Mode</h2>
+        <p class="text-slate-400 text-sm mt-2">ตั้งรหัสผ่านเพื่อป้องกันการเปลี่ยนกลับไป Cloud</p>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-2">รหัสผ่าน (4-20 ตัวอักษร)</label>
+          <input type="password" id="lock-password"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
+            placeholder="••••••"
+            minlength="4" maxlength="20">
+        </div>
+
+        <div>
+          <label class="block text-sm text-slate-300 mb-2">ยืนยันรหัสผ่าน</label>
+          <input type="password" id="lock-password-confirm"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
+            placeholder="••••••"
+            minlength="4" maxlength="20">
+        </div>
+
+        <button onclick="confirmOfflineLock()" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold transition-colors">
+          🔐 ล็อค Offline พร้อมรหัสผ่าน
+        </button>
+
+        <button onclick="skipOfflineLock()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
+          ใช้ Offline โดยไม่ล็อค
+        </button>
+
+        <button onclick="closeOfflineLockModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
+          ยกเลิก
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('lock-password')?.focus();
+};
+
+window.confirmOfflineLock = () => {
+  const password = document.getElementById('lock-password')?.value;
+  const confirm = document.getElementById('lock-password-confirm')?.value;
+
+  if (!password || password.length < 4) {
+    showToast('รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร', 'error');
+    return;
+  }
+
+  if (password !== confirm) {
+    showToast('รหัสผ่านไม่ตรงกัน', 'error');
+    return;
+  }
+
+  // Save lock
   localStorage.setItem(LOCAL_ONLY_KEY, 'true');
-  hideFirebaseSetupModal();
+  localStorage.setItem(OFFLINE_LOCK_KEY, hashPassword(password));
+
+  closeOfflineLockModal();
   updateSyncStatus();
+  showToast('ล็อค Offline Mode สำเร็จ', 'success');
   if (window.render) window.render();
 };
 
-window.showFirebaseSetup = () => {
-  showFirebaseSetupModal();
+window.skipOfflineLock = () => {
+  localStorage.setItem(LOCAL_ONLY_KEY, 'true');
+  localStorage.removeItem(OFFLINE_LOCK_KEY);
+
+  closeOfflineLockModal();
+  updateSyncStatus();
+  showToast('เปิดใช้งาน Offline Mode', 'success');
+  if (window.render) window.render();
 };
 
-window.resetFirebaseConfig = () => {
-  if (confirm('ต้องการรีเซ็ตการตั้งค่า Firebase?')) {
-    // Clear listeners
-    syncListeners.forEach(unsub => unsub());
-    syncListeners = [];
-    
-    // Clear config
-    localStorage.removeItem(FIREBASE_CONFIG_KEY);
-    localStorage.removeItem(LOCAL_ONLY_KEY);
-    
-    // Reset state
-    firebaseApp = null;
-    firebaseDb = null;
-    isOnline = false;
-    
-    showToast('รีเซ็ตการตั้งค่าแล้ว', 'success');
-    showFirebaseSetupModal();
+window.closeOfflineLockModal = () => {
+  const modal = document.getElementById('offline-lock-modal');
+  if (modal) modal.remove();
+};
+
+// ===== Unlock Modal =====
+const showUnlockModal = () => {
+  const existingModal = document.getElementById('unlock-modal');
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'unlock-modal';
+  modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4';
+  modal.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-sm p-6 fade-in">
+      <div class="text-center mb-6">
+        <div class="text-5xl mb-3">🔐</div>
+        <h2 class="text-xl font-bold text-cyan-400">ปลดล็อค Offline Mode</h2>
+        <p class="text-slate-400 text-sm mt-2">ใส่รหัสผ่านเพื่อเปลี่ยนการตั้งค่า Cloud Sync</p>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-2">รหัสผ่าน</label>
+          <input type="password" id="unlock-password"
+            class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
+            placeholder="••••••"
+            onkeypress="if(event.key==='Enter')unlockOffline()">
+        </div>
+
+        <button onclick="unlockOffline()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold transition-colors">
+          🔓 ปลดล็อค
+        </button>
+
+        <button onclick="closeUnlockModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
+          ยกเลิก
+        </button>
+      </div>
+
+      <div class="mt-4 pt-4 border-t border-slate-700">
+        <p class="text-xs text-slate-500 text-center">ลืมรหัสผ่าน? ต้องล้างข้อมูลแอพทั้งหมด</p>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('unlock-password')?.focus();
+};
+
+window.unlockOffline = () => {
+  const password = document.getElementById('unlock-password')?.value;
+
+  if (!password) {
+    showToast('กรุณาใส่รหัสผ่าน', 'error');
+    return;
   }
+
+  if (verifyOfflineLock(password)) {
+    // Unlock successful
+    localStorage.removeItem(OFFLINE_LOCK_KEY);
+    localStorage.removeItem(LOCAL_ONLY_KEY);
+
+    closeUnlockModal();
+    showToast('ปลดล็อคสำเร็จ', 'success');
+
+    // Show setup modal
+    setTimeout(() => {
+      showSyncSetupModal();
+    }, 300);
+  } else {
+    showToast('รหัสผ่านไม่ถูกต้อง', 'error');
+    document.getElementById('unlock-password').value = '';
+    document.getElementById('unlock-password')?.focus();
+  }
+};
+
+window.closeUnlockModal = () => {
+  const modal = document.getElementById('unlock-modal');
+  if (modal) modal.remove();
+};
+
+window.closeSyncModal = () => {
+  const modal = document.getElementById('sync-setup-modal');
+  if (modal) modal.remove();
+};
+
+window.showSyncSetup = showSyncSetupModal;
+
+window.resetSyncConfig = () => {
+  if (confirm('ต้องการรีเซ็ตการตั้งค่า Cloud Sync?')) {
+    if (providerInstance) {
+      providerInstance.destroy?.();
+      providerInstance = null;
+    }
+    localStorage.removeItem(SYNC_CONFIG_KEY);
+    localStorage.removeItem(LOCAL_ONLY_KEY);
+    currentProvider = null;
+    isOnline = false;
+    showToast('รีเซ็ตการตั้งค่าแล้ว', 'success');
+    showSyncSetupModal();
+  }
+};
+
+// ===== Enhanced Storage =====
+const enhanceStorageWithSync = () => {
+  if (!window.storage) return;
+
+  const originalSet = window.storage.set;
+
+  window.storage.set = (key, data) => {
+    const result = originalSet.call(window.storage, key, data);
+
+    if (providerInstance && isOnline && !isLocalOnly() && SYNC_KEYS.includes(key)) {
+      providerInstance.set?.(key, data).catch(err => {
+        console.error('Sync error:', err);
+      });
+    }
+
+    return result;
+  };
 };
 
 // ===== Initialization =====
-const initFirebaseSync = () => {
+const initCloudSync = async () => {
   createSyncStatusUI();
-  
-  const config = getFirebaseConfig();
-  
+
   if (isLocalOnly()) {
     updateSyncStatus();
-  } else if (config) {
-    if (initFirebase(config)) {
-      setupFirebaseListeners();
-      enhanceStorageWithSync();
+    return;
+  }
+
+  const savedConfig = getSyncConfig();
+  if (savedConfig?.provider && savedConfig?.config) {
+    currentProvider = savedConfig.provider;
+    const adapter = adapters[currentProvider];
+
+    if (adapter) {
+      providerInstance = adapter;
+      if (await adapter.init(savedConfig.config)) {
+        adapter.setupListeners?.(() => {
+          if (window.render) window.render();
+        });
+        enhanceStorageWithSync();
+      }
     }
-  } else {
-    // Show setup modal for first time
-    showFirebaseSetupModal();
   }
 };
 
-// Auto-init when DOM is ready
+// Auto-init
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initFirebaseSync);
+  document.addEventListener('DOMContentLoaded', initCloudSync);
 } else {
-  initFirebaseSync();
+  initCloudSync();
 }
 
-// Export for external use
-window.firebaseSync = {
+// Export
+window.cloudSync = {
   isOnline: () => isOnline,
   isLocalOnly,
-  syncLocalToCloud,
-  syncCloudToLocal,
-  showSetup: showFirebaseSetupModal,
-  reset: window.resetFirebaseConfig
+  getProvider: () => currentProvider,
+  syncToCloud: () => providerInstance?.syncToCloud?.(),
+  syncFromCloud: () => providerInstance?.syncFromCloud?.(),
+  showSetup: showSyncSetupModal,
+  reset: window.resetSyncConfig,
+  PROVIDERS
 };
+
+// Backwards compatibility
+window.firebaseSync = window.cloudSync;
