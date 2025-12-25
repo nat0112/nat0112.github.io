@@ -1157,6 +1157,9 @@
       let totalFcrSum = 0;
       let fcrCount = 0;
 
+      // FCR by fish type
+      const fcrByFishType = {};
+
       activePonds.forEach(p => {
         const cycle = db.cycles.getActive(p.id);
         if (cycle) {
@@ -1164,14 +1167,30 @@
           if (stats) {
             totalCost += stats.totalCost;
             if (stats.fcr !== '-') {
-              totalFcrSum += parseFloat(stats.fcr);
+              const fcrValue = parseFloat(stats.fcr);
+              totalFcrSum += fcrValue;
               fcrCount++;
+
+              // Group by fish type
+              const fishTypeName = cycle.fishTypeName || 'ไม่ระบุ';
+              if (!fcrByFishType[fishTypeName]) {
+                fcrByFishType[fishTypeName] = { sum: 0, count: 0 };
+              }
+              fcrByFishType[fishTypeName].sum += fcrValue;
+              fcrByFishType[fishTypeName].count++;
             }
           }
         }
       });
 
       const avgFcr = fcrCount > 0 ? (totalFcrSum / fcrCount).toFixed(2) : '-';
+
+      // Calculate average FCR for each fish type
+      const fishTypeFcrList = Object.entries(fcrByFishType).map(([name, data]) => ({
+        name,
+        fcr: (data.sum / data.count).toFixed(2),
+        count: data.count
+      }));
 
       return `
         <div class="p-4 max-w-lg mx-auto fade-in">
@@ -1207,14 +1226,28 @@
             </div>
           </div>
 
+          ${fishTypeFcrList.length > 1 ? `
+          <!-- FCR by Fish Type -->
+          <div class="mb-6">
+            <h3 class="text-sm font-medium text-slate-400 mb-2">📊 FCR แยกตามชนิดปลา</h3>
+            <div class="grid grid-cols-${Math.min(fishTypeFcrList.length, 3)} gap-2">
+              ${fishTypeFcrList.map(ft => {
+                const fcrNum = parseFloat(ft.fcr);
+                const fcrColor = fcrNum < 1.5 ? 'text-green-400 border-green-500/30' : fcrNum < 2 ? 'text-cyan-400 border-cyan-500/30' : fcrNum < 2.5 ? 'text-amber-400 border-amber-500/30' : 'text-red-400 border-red-500/30';
+                return `
+                  <div class="bg-slate-800/40 rounded-xl p-3 border ${fcrColor.split(' ')[1]} text-center">
+                    <div class="text-xs text-slate-400 mb-1">${ft.name}</div>
+                    <div class="text-xl font-bold ${fcrColor.split(' ')[0]}">${ft.fcr}</div>
+                    <div class="text-[10px] text-slate-500">${ft.count} บ่อ</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+          ` : ''}
+
           <!-- Feed Stock Section -->
           <div class="mb-6">
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="text-lg font-semibold">📦 คลังอาหาร</h2>
-              <button onclick="setState({modal:'addFeedStock'})" class="flex items-center gap-1 px-3 py-1.5 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg text-sm font-medium transition-colors">
-                + เพิ่มสต็อก
-              </button>
-            </div>
             ${(() => {
               const feeds = db.feeds.getAll();
               const feedsWithStock = feeds.map(f => ({
@@ -1222,8 +1255,20 @@
                 stock: db.feedStock.getStock(f.id)
               })).filter(f => f.stock > 0);
 
+              const showCollapseBtn = feedsWithStock.length > 4;
+              const isCollapsed = state.feedStockCollapsed !== undefined ? state.feedStockCollapsed : showCollapseBtn;
+              const displayFeeds = isCollapsed ? feedsWithStock.slice(0, 4) : feedsWithStock;
+              const hiddenCount = feedsWithStock.length - 4;
+              const totalStock = feedsWithStock.reduce((sum, f) => sum + f.stock, 0);
+
               if (feedsWithStock.length === 0) {
                 return `
+                  <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-lg font-semibold">📦 คลังอาหาร</h2>
+                    <button onclick="setState({modal:'addFeedStock'})" class="flex items-center gap-1 px-3 py-1.5 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg text-sm font-medium transition-colors">
+                      + เพิ่มสต็อก
+                    </button>
+                  </div>
                   <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50 text-center">
                     <div class="text-3xl mb-2">📦</div>
                     <p class="text-slate-400 text-sm">ยังไม่มีอาหารในสต็อก</p>
@@ -1233,31 +1278,40 @@
               }
 
               return `
-                <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
-                  <div class="space-y-2">
-                    ${feedsWithStock.map(f => `
-                      <div class="flex items-center justify-between bg-slate-700/30 rounded-xl p-3">
-                        <div class="flex items-center gap-2">
-                          <span class="text-lg">${f.type === 'fresh' ? '🟠' : '🔵'}</span>
-                          <div>
-                            <span class="text-slate-200 font-medium">${f.name}</span>
-                            ${f.brand ? `<span class="text-xs text-slate-400 ml-1">(${f.brand})</span>` : ''}
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <span class="text-lg font-bold ${f.stock < 10 ? 'text-red-400' : f.stock < 30 ? 'text-amber-400' : 'text-green-400'}">${formatNumber(f.stock, 1)}</span>
-                          <span class="text-xs text-slate-400">กก.</span>
-                          <button onclick="setState({modal:'editFeedStock', editingStockFeedId:'${f.id}'})" class="p-1 text-slate-400 hover:text-cyan-400 rounded">✏️</button>
-                          <button onclick="requestDeleteStock('${f.id}')" class="p-1 text-slate-400 hover:text-red-400 rounded">🗑️</button>
-                        </div>
-                      </div>
-                    `).join('')}
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <h2 class="text-lg font-semibold">📦 คลังอาหาร</h2>
+                    <span class="text-xs text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded">${feedsWithStock.length} รายการ • ${formatNumber(totalStock, 1)} กก.</span>
                   </div>
-                  <div class="mt-3 pt-3 border-t border-slate-700/50 flex justify-between text-sm">
-                    <span class="text-slate-400">รวมทั้งหมด</span>
-                    <span class="text-cyan-400 font-bold">${formatNumber(feedsWithStock.reduce((sum, f) => sum + f.stock, 0), 1)} กก.</span>
+                  <div class="flex items-center gap-1">
+                    <button onclick="setState({modal:'stockHistory', stockHistoryLimit: 20})" class="p-1.5 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 rounded-lg text-sm transition-colors" title="ประวัติ">📊</button>
+                    <button onclick="setState({modal:'addFeedStock'})" class="px-2 py-1 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg text-xs font-medium transition-colors">+ เพิ่มสต็อก</button>
                   </div>
                 </div>
+                <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  ${displayFeeds.map(f => {
+                    const stockColor = f.stock < 10 ? 'border-red-500/40 bg-red-500/5' : f.stock < 30 ? 'border-amber-500/40 bg-amber-500/5' : 'border-green-500/40 bg-green-500/5';
+                    const textColor = f.stock < 10 ? 'text-red-400' : f.stock < 30 ? 'text-amber-400' : 'text-green-400';
+                    return `
+                      <div onclick="setState({modal:'editFeedStock', editingStockFeedId:'${f.id}'})" class="bg-slate-800/60 rounded-xl p-2 border ${stockColor} hover:bg-slate-700/50 cursor-pointer transition-all relative group">
+                        <button onclick="event.stopPropagation(); requestDeleteStock('${f.id}')" class="absolute -top-1 -right-1 w-5 h-5 bg-slate-700 hover:bg-red-500/80 text-slate-400 hover:text-white rounded-full text-[10px] sm:opacity-0 sm:group-hover:opacity-100 transition-all flex items-center justify-center" title="ลบ">✕</button>
+                        <div class="flex items-center gap-1.5 mb-1">
+                          <span class="text-sm">${f.type === 'fresh' ? '🟠' : '🔵'}</span>
+                          <span class="text-xs font-medium text-slate-300 truncate flex-1">${f.name}</span>
+                        </div>
+                        <div class="flex items-baseline gap-0.5">
+                          <span class="text-base font-bold ${textColor}">${formatNumber(f.stock, 1)}</span>
+                          <span class="text-[10px] text-slate-500">กก.</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+                ${showCollapseBtn ? `
+                  <button onclick="setState({feedStockCollapsed: ${!isCollapsed}})" class="w-full mt-2 py-1.5 bg-slate-800/40 hover:bg-slate-700/40 text-slate-400 rounded-lg text-xs transition-colors flex items-center justify-center gap-1">
+                    ${isCollapsed ? `▼ ดูเพิ่ม (${hiddenCount} รายการ)` : '▲ ย่อ'}
+                  </button>
+                ` : ''}
               `;
             })()}
           </div>
@@ -1622,118 +1676,142 @@
       const medicines = db.medicines.getAll();
       const fishTypes = db.fishTypes.getAll();
 
+      // Get collapsed state from state or default all expanded
+      const collapsed = state.inventoryCollapsed || {};
+
+      const renderSection = (id, icon, title, count, color, addModal, content) => {
+        const isCollapsed = collapsed[id];
+        return `
+          <div class="mb-4">
+            <div class="flex items-center justify-between bg-slate-800/60 rounded-xl p-3 border border-slate-700/50 cursor-pointer hover:bg-slate-700/50 transition-colors" onclick="toggleInventorySection('${id}')">
+              <div class="flex items-center gap-3">
+                <span class="text-xl">${icon}</span>
+                <div>
+                  <h2 class="font-semibold text-slate-200">${title}</h2>
+                  <span class="text-xs text-slate-500">${count} รายการ</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="event.stopPropagation(); setState({modal:'${addModal}'})" class="flex items-center gap-1 px-3 py-1.5 ${color} rounded-lg text-sm">+ เพิ่ม</button>
+                <span class="text-slate-400 text-lg">${isCollapsed ? '▶' : '▼'}</span>
+              </div>
+            </div>
+            ${!isCollapsed ? `<div class="mt-2 space-y-2">${content}</div>` : ''}
+          </div>
+        `;
+      };
+
+      // Fish Types content
+      const fishTypesContent = fishTypes.length === 0
+        ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลชนิดปลา</p>'
+        : fishTypes.map(ft => `
+          <div class="flex items-center justify-between bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-200">${ft.name}</span>
+                <span class="px-2 py-0.5 rounded text-xs ${ft.feedType === 'fresh' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}">${ft.feedType === 'fresh' ? 'อาหารสด' : 'อาหารเม็ด'}</span>
+              </div>
+              <div class="text-xs text-slate-400 mt-0.5">น้ำหนักเฉลี่ย: ${formatNumber(ft.avgWeight)} กรัม/ตัว</div>
+            </div>
+            <div class="flex items-center gap-1">
+              <button onclick="editFishType('${ft.id}')" class="p-1.5 text-slate-400 hover:text-cyan-400 rounded-lg">✏️</button>
+              <button onclick="deleteFishType('${ft.id}')" class="p-1.5 text-slate-400 hover:text-red-400 rounded-lg">🗑️</button>
+              ${ft.editHistory?.length > 0 ? `<button onclick="showFishTypeHistory('${ft.id}')" class="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg" title="ดูประวัติ">📜</button>` : ''}
+            </div>
+          </div>
+        `).join('');
+
+      // Feeds content
+      const feedsContent = feeds.length === 0
+        ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลอาหาร</p>'
+        : feeds.map(f => `
+          <div class="flex items-center justify-between bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-xs ${f.type === 'fresh' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}">${f.type === 'fresh' ? 'สด' : 'เม็ด'}</span>
+                <span class="font-medium text-slate-200">${f.name}</span>
+              </div>
+              ${f.type === 'pellet' && (f.brand || f.sizeNumber || f.bagSize) ? `<div class="text-xs text-slate-400 mt-0.5">${f.brand || ''} ${f.sizeNumber ? `เบอร์ ${f.sizeNumber}` : ''} ${f.useBag && f.bagSize ? `(${f.bagSize}กก./กระสอบ)` : ''}</div>` : ''}
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300 text-sm">${formatCurrency(f.pricePerKg)}/กก.</span>
+              <button onclick="editFeed('${f.id}')" class="text-slate-400 hover:text-cyan-400" title="แก้ไข">✏️</button>
+              ${f.editHistory && f.editHistory.length > 0 ? `<button onclick="viewFeedHistory('${f.id}')" class="text-slate-400 hover:text-amber-400" title="ดูประวัติการแก้ไข">📜</button>` : ''}
+              <button onclick="deleteFeed('${f.id}')" class="text-slate-400 hover:text-red-400" title="ลบ">🗑️</button>
+            </div>
+          </div>
+        `).join('');
+
+      // Supplements content
+      const supplementsContent = supplements.length === 0
+        ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลวิตามิน</p>'
+        : supplements.map(s => `
+          <div class="flex items-center justify-between bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-200">${s.name}</span>
+                <span class="px-2 py-0.5 rounded text-xs ${s.suppType === 'liquid' ? 'bg-blue-500/20 text-blue-400' : 'bg-cyan-500/20 text-cyan-400'}">${s.suppType === 'liquid' ? '💧 น้ำ' : '💊 เม็ด'}</span>
+              </div>
+              ${s.description ? `<div class="text-xs text-slate-400">${s.description}</div>` : ''}
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300 text-sm">${formatCurrency(s.price)}/${s.packageSize || 100}${s.unit}</span>
+              <button onclick="editSupplement('${s.id}')" class="text-slate-400 hover:text-cyan-400" title="แก้ไข">✏️</button>
+              ${s.editHistory && s.editHistory.length > 0 ? `<button onclick="viewSupplementHistory('${s.id}')" class="text-slate-400 hover:text-amber-400" title="ดูประวัติการแก้ไข">📜</button>` : ''}
+              <button onclick="deleteSupplement('${s.id}')" class="text-slate-400 hover:text-red-400" title="ลบ">🗑️</button>
+            </div>
+          </div>
+        `).join('');
+
+      // Medicines content
+      const medicinesContent = medicines.length === 0
+        ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลยารักษาโรค</p>'
+        : medicines.map(m => `
+          <div class="bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-200">${m.name}</span>
+                <span class="px-2 py-0.5 rounded text-xs ${m.medType === 'liquid' ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}">${m.medType === 'liquid' ? '💧 น้ำ' : '💊 เม็ด/ผง'}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-slate-300 text-sm">${formatCurrency(m.price)}/${m.packageSize || 100}${m.unit}</span>
+                <button onclick="editMedicine('${m.id}')" class="text-slate-400 hover:text-rose-400" title="แก้ไข">✏️</button>
+                ${m.editHistory && m.editHistory.length > 0 ? `<button onclick="viewMedicineHistory('${m.id}')" class="text-slate-400 hover:text-amber-400" title="ดูประวัติการแก้ไข">📜</button>` : ''}
+                <button onclick="deleteMedicine('${m.id}')" class="text-slate-400 hover:text-red-400" title="ลบ">🗑️</button>
+              </div>
+            </div>
+            ${m.description ? `<div class="text-xs text-slate-400 mb-1">${m.description}</div>` : ''}
+            <div class="text-xs text-rose-300 bg-rose-500/10 rounded-lg p-2 mt-2">
+              <span class="text-rose-400 font-medium">📋 วิธีใช้:</span> ${m.usageDetails}
+            </div>
+          </div>
+        `).join('');
+
+      const totalItems = fishTypes.length + feeds.length + supplements.length + medicines.length;
+
       return `
         <div class="p-4 max-w-lg mx-auto fade-in">
-          <h1 class="text-xl font-bold mb-6">📦 คลังข้อมูล</h1>
-
-          <!-- Fish Types Section -->
-          <div class="mb-6">
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="font-semibold text-slate-200">🐟 ชนิดปลา</h2>
-              <button onclick="setState({modal:'addFishType'})" class="flex items-center gap-1 px-3 py-1.5 bg-cyan-500/20 text-cyan-400 rounded-lg text-sm">+ เพิ่ม</button>
-            </div>
-            <div class="space-y-2">
-              ${fishTypes.length === 0 ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลชนิดปลา</p>' : fishTypes.map(ft => `
-                <div class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3 border border-slate-700/50">
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium text-slate-200">${ft.name}</span>
-                      <span class="px-2 py-0.5 rounded text-xs ${ft.feedType === 'fresh' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}">${ft.feedType === 'fresh' ? 'อาหารสด' : 'อาหารเม็ด'}</span>
-                    </div>
-                    <div class="text-xs text-slate-400 mt-0.5">น้ำหนักเฉลี่ย: ${formatNumber(ft.avgWeight)} กรัม/ตัว</div>
-                  </div>
-                  <div class="flex items-center gap-1">
-                    <button onclick="editFishType('${ft.id}')" class="p-1.5 text-slate-400 hover:text-cyan-400 rounded-lg">✏️</button>
-                    <button onclick="deleteFishType('${ft.id}')" class="p-1.5 text-slate-400 hover:text-red-400 rounded-lg">🗑️</button>
-                    ${ft.editHistory?.length > 0 ? `<button onclick="showFishTypeHistory('${ft.id}')" class="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg" title="ดูประวัติ">📜</button>` : ''}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
+          <div class="flex items-center justify-between mb-4">
+            <h1 class="text-xl font-bold">📦 คลังข้อมูล</h1>
+            <span class="text-xs text-slate-500 bg-slate-800/50 px-2 py-1 rounded-lg">${totalItems} รายการ</span>
           </div>
 
-          <!-- Feeds Section -->
-          <div class="mb-6">
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="font-semibold text-slate-200">🥫 อาหาร</h2>
-              <button onclick="setState({modal:'addFeed'})" class="flex items-center gap-1 px-3 py-1.5 bg-cyan-500/20 text-cyan-400 rounded-lg text-sm">+ เพิ่ม</button>
-            </div>
-            <div class="space-y-2">
-              ${feeds.length === 0 ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลอาหาร</p>' : feeds.map(f => `
-                <div class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3 border border-slate-700/50">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="px-2 py-0.5 rounded text-xs ${f.type === 'fresh' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}">${f.type === 'fresh' ? 'สด' : 'เม็ด'}</span>
-                      <span class="font-medium text-slate-200">${f.name}</span>
-                    </div>
-                    ${f.type === 'pellet' && (f.brand || f.sizeNumber || f.bagSize) ? `<div class="text-xs text-slate-400 mt-0.5">${f.brand || ''} ${f.sizeNumber ? `เบอร์ ${f.sizeNumber}` : ''} ${f.useBag && f.bagSize ? `(${f.bagSize}กก./กระสอบ)` : ''}</div>` : ''}
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-slate-300 text-sm">${formatCurrency(f.pricePerKg)}/กก.</span>
-                    <button onclick="editFeed('${f.id}')" class="text-slate-400 hover:text-cyan-400" title="แก้ไข">✏️</button>
-                    ${f.editHistory && f.editHistory.length > 0 ? `<button onclick="viewFeedHistory('${f.id}')" class="text-slate-400 hover:text-amber-400" title="ดูประวัติการแก้ไข">📜</button>` : ''}
-                    <button onclick="deleteFeed('${f.id}')" class="text-slate-400 hover:text-red-400" title="ลบ">🗑️</button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
+          <!-- Quick Search -->
+          <div class="mb-4">
+            <input type="text" id="inventorySearch" placeholder="🔍 ค้นหา..." oninput="filterInventory(this.value)" class="w-full bg-slate-800/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-slate-100 placeholder-slate-500 text-sm">
           </div>
 
-          <!-- Supplements Section -->
-          <div>
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="font-semibold text-slate-200">💊 วิตามิน/อาหารเสริม</h2>
-              <button onclick="setState({modal:'addSupplement'})" class="flex items-center gap-1 px-3 py-1.5 bg-cyan-500/20 text-cyan-400 rounded-lg text-sm">+ เพิ่ม</button>
-            </div>
-            <div class="space-y-2">
-              ${supplements.length === 0 ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลวิตามิน</p>' : supplements.map(s => `
-                <div class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3 border border-slate-700/50">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium text-slate-200">${s.name}</span>
-                      <span class="px-2 py-0.5 rounded text-xs ${s.suppType === 'liquid' ? 'bg-blue-500/20 text-blue-400' : 'bg-cyan-500/20 text-cyan-400'}">${s.suppType === 'liquid' ? '💧 น้ำ' : '💊 เม็ด'}</span>
-                    </div>
-                    ${s.description ? `<div class="text-xs text-slate-400">${s.description}</div>` : ''}
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-slate-300 text-sm">${formatCurrency(s.price)}/${s.packageSize || 100}${s.unit}</span>
-                    <button onclick="editSupplement('${s.id}')" class="text-slate-400 hover:text-cyan-400" title="แก้ไข">✏️</button>
-                    ${s.editHistory && s.editHistory.length > 0 ? `<button onclick="viewSupplementHistory('${s.id}')" class="text-slate-400 hover:text-amber-400" title="ดูประวัติการแก้ไข">📜</button>` : ''}
-                    <button onclick="deleteSupplement('${s.id}')" class="text-slate-400 hover:text-red-400" title="ลบ">🗑️</button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
+          <div id="inventorySections">
+            ${renderSection('fishTypes', '🐟', 'ชนิดปลา', fishTypes.length, 'bg-cyan-500/20 text-cyan-400', 'addFishType', fishTypesContent)}
+            ${renderSection('feeds', '🥫', 'อาหาร', feeds.length, 'bg-cyan-500/20 text-cyan-400', 'addFeed', feedsContent)}
+            ${renderSection('supplements', '💊', 'วิตามิน/อาหารเสริม', supplements.length, 'bg-cyan-500/20 text-cyan-400', 'addSupplement', supplementsContent)}
+            ${renderSection('medicines', '💉', 'ยารักษาโรค', medicines.length, 'bg-rose-500/20 text-rose-400', 'addMedicine', medicinesContent)}
           </div>
 
-          <!-- Medicines Section -->
-          <div>
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="font-semibold text-slate-200">💉 ยารักษาโรค</h2>
-              <button onclick="setState({modal:'addMedicine'})" class="flex items-center gap-1 px-3 py-1.5 bg-rose-500/20 text-rose-400 rounded-lg text-sm">+ เพิ่ม</button>
-            </div>
-            <div class="space-y-2">
-              ${medicines.length === 0 ? '<p class="text-slate-500 text-sm text-center py-4">ยังไม่มีข้อมูลยารักษาโรค</p>' : medicines.map(m => `
-                <div class="bg-slate-800/50 rounded-xl p-3 border border-slate-700/50">
-                  <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium text-slate-200">${m.name}</span>
-                      <span class="px-2 py-0.5 rounded text-xs ${m.medType === 'liquid' ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}">${m.medType === 'liquid' ? '💧 น้ำ' : '💊 เม็ด/ผง'}</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span class="text-slate-300 text-sm">${formatCurrency(m.price)}/${m.packageSize || 100}${m.unit}</span>
-                      <button onclick="editMedicine('${m.id}')" class="text-slate-400 hover:text-rose-400" title="แก้ไข">✏️</button>
-                      ${m.editHistory && m.editHistory.length > 0 ? `<button onclick="viewMedicineHistory('${m.id}')" class="text-slate-400 hover:text-amber-400" title="ดูประวัติการแก้ไข">📜</button>` : ''}
-                      <button onclick="deleteMedicine('${m.id}')" class="text-slate-400 hover:text-red-400" title="ลบ">🗑️</button>
-                    </div>
-                  </div>
-                  ${m.description ? `<div class="text-xs text-slate-400 mb-1">${m.description}</div>` : ''}
-                  <div class="text-xs text-rose-300 bg-rose-500/10 rounded-lg p-2 mt-2">
-                    <span class="text-rose-400 font-medium">📋 วิธีใช้:</span> ${m.usageDetails}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
+          <!-- Collapse/Expand All -->
+          <div class="flex gap-2 mt-4">
+            <button onclick="collapseAllInventory()" class="flex-1 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 rounded-xl text-sm transition-colors">▶ ย่อทั้งหมด</button>
+            <button onclick="expandAllInventory()" class="flex-1 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 rounded-xl text-sm transition-colors">▼ ขยายทั้งหมด</button>
           </div>
         </div>
       `;
@@ -1981,6 +2059,29 @@
             `}
           </div>
 
+          <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50 mb-4">
+            <h3 class="font-semibold mb-3">📤 ส่งออกข้อมูล (Export)</h3>
+            <p class="text-sm text-slate-400 mb-3">ดาวน์โหลดข้อมูลเป็นไฟล์</p>
+            <div class="space-y-2">
+              <button onclick="exportFeedingData()" class="w-full p-3 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-xl transition-colors text-sm flex items-center justify-center gap-2">
+                <span>🍽️</span>
+                <span>ส่งออกข้อมูลการให้อาหาร</span>
+              </button>
+              <button onclick="exportStockData()" class="w-full p-3 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-xl transition-colors text-sm flex items-center justify-center gap-2">
+                <span>📦</span>
+                <span>ส่งออกข้อมูลคลังอาหาร</span>
+              </button>
+              <button onclick="exportAllDataCSV()" class="w-full p-3 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 rounded-xl transition-colors text-sm flex items-center justify-center gap-2">
+                <span>📊</span>
+                <span>ส่งออกข้อมูลทั้งหมด (CSV)</span>
+              </button>
+              <button onclick="exportAllDataJSON()" class="w-full p-3 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-xl transition-colors text-sm flex items-center justify-center gap-2">
+                <span>💾</span>
+                <span>สำรองข้อมูลทั้งหมด (JSON)</span>
+              </button>
+            </div>
+          </div>
+
           <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
             <h3 class="font-semibold mb-3">จัดการข้อมูล</h3>
             <button onclick="clearAllData()" class="w-full p-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-colors text-sm">
@@ -2037,6 +2138,7 @@
         mortality: renderMortalityModal,
         addFeedStock: renderAddFeedStockModal,
         editFeedStock: renderEditFeedStockModal,
+        stockHistory: renderStockHistoryModal,
         stockPasswordConfirm: renderStockPasswordConfirmModal,
         stockPasswordManage: renderStockPasswordManageModal
       };
@@ -2381,18 +2483,27 @@
 
             <div class="bg-slate-700/30 rounded-xl p-4 mb-4 border border-slate-600/50">
               <h4 class="text-sm font-medium text-amber-400 mb-3">📦 ปลาไม่ได้ขนาด</h4>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-sm text-slate-400 mb-1">น้ำหนัก (กก.)</label>
-                  <input type="number" step="0.1" name="undersizedWeight" id="harvestUndersizedWeight" placeholder="0" value="0" min="0" oninput="calculateHarvestCount()" class="w-full bg-slate-600 border border-slate-500 rounded-xl px-4 py-3 text-slate-100">
-                </div>
-                <div>
-                  <label class="block text-sm text-slate-400 mb-1">ราคา (บาท/กก.)</label>
-                  <input type="number" step="0.1" name="undersizedPrice" placeholder="35" value="0" min="0" class="w-full bg-slate-600 border border-slate-500 rounded-xl px-4 py-3 text-slate-100">
-                </div>
+              <div class="mb-3">
+                <label class="block text-sm text-slate-400 mb-1">น้ำหนัก (กก.)</label>
+                <input type="number" step="0.1" name="undersizedWeight" id="harvestUndersizedWeight" placeholder="0" value="0" min="0" oninput="calculateHarvestCount()" class="w-full bg-slate-600 border border-slate-500 rounded-xl px-4 py-3 text-slate-100">
+              </div>
+              <div class="flex gap-3 mb-3">
+                <label class="flex-1 flex items-center gap-2 cursor-pointer bg-slate-600/50 rounded-xl p-3 border border-slate-500/50" onclick="selectUndersizedAction('sell')">
+                  <input type="radio" name="undersizedAction" value="sell" id="actionSell" class="accent-green-500">
+                  <span class="text-sm text-slate-200">ขาย</span>
+                </label>
+                <label class="flex-1 flex items-center gap-2 cursor-pointer bg-slate-600/50 rounded-xl p-3 border border-slate-500/50" onclick="selectUndersizedAction('keep')">
+                  <input type="radio" name="undersizedAction" value="keep" id="actionKeep" checked class="accent-amber-500">
+                  <span class="text-sm text-slate-200">เลี้ยงต่อ</span>
+                </label>
+              </div>
+              <div id="undersizedPriceSection" class="hidden">
+                <label class="block text-sm text-slate-400 mb-1">ราคา (บาท/กก.)</label>
+                <input type="number" step="0.1" name="undersizedPrice" id="harvestUndersizedPrice" placeholder="35" value="0" min="0" class="w-full bg-slate-600 border border-slate-500 rounded-xl px-4 py-3 text-slate-100">
               </div>
               <div class="mt-2 text-sm text-slate-300">
                 จำนวน: <span id="undersizedCount" class="text-amber-400 font-medium">0</span> ตัว
+                <span id="undersizedActionText" class="text-amber-400/70 ml-1">(เลี้ยงต่อ)</span>
               </div>
             </div>
 
@@ -2759,6 +2870,210 @@
             </div>
             <button type="submit" id="stockSubmitBtn" class="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-colors">+ เพิ่มสต็อก</button>
           </form>
+        </div>
+      `;
+    };
+
+    // Stock History Modal
+    const renderStockHistoryModal = () => {
+      const stocks = db.feedStock.getAll();
+      const feeds = db.feeds.getAll();
+      const historyLimit = state.stockHistoryLimit || 20;
+
+      // Collect all history entries with feed info
+      const allHistory = [];
+      stocks.forEach(stock => {
+        const feed = feeds.find(f => f.id === stock.feedId);
+        if (stock.history && feed) {
+          stock.history.forEach(h => {
+            allHistory.push({
+              ...h,
+              feedName: feed.name,
+              feedType: feed.type,
+              feedId: stock.feedId
+            });
+          });
+        }
+      });
+
+      // Sort by date descending
+      allHistory.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      // Calculate summary
+      const summary = {
+        totalAdd: 0,
+        totalDeduct: 0,
+        byFeed: {},
+        byType: { fresh: { add: 0, deduct: 0 }, pellet: { add: 0, deduct: 0 } }
+      };
+      allHistory.forEach(h => {
+        if (h.type === 'add') {
+          summary.totalAdd += h.quantity;
+          summary.byType[h.feedType].add += h.quantity;
+        } else if (h.type === 'deduct') {
+          summary.totalDeduct += h.quantity;
+          summary.byType[h.feedType].deduct += h.quantity;
+        }
+        if (!summary.byFeed[h.feedName]) {
+          summary.byFeed[h.feedName] = { add: 0, deduct: 0, type: h.feedType };
+        }
+        if (h.type === 'add') summary.byFeed[h.feedName].add += h.quantity;
+        if (h.type === 'deduct') summary.byFeed[h.feedName].deduct += h.quantity;
+      });
+
+      // Group by week for chart
+      const weeklyData = {};
+      const now = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        weeklyData[key] = { add: 0, deduct: 0 };
+      }
+
+      allHistory.forEach(h => {
+        const dateKey = h.date.split('T')[0];
+        if (weeklyData[dateKey]) {
+          if (h.type === 'add') {
+            weeklyData[dateKey].add += h.quantity;
+          } else if (h.type === 'deduct') {
+            weeklyData[dateKey].deduct += h.quantity;
+          }
+        }
+      });
+
+      const weekDays = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+      const chartData = Object.entries(weeklyData).map(([date, data]) => {
+        const d = new Date(date);
+        return {
+          label: weekDays[d.getDay()],
+          date: date,
+          add: data.add,
+          deduct: data.deduct
+        };
+      });
+
+      const maxValue = Math.max(...chartData.map(d => Math.max(d.add, d.deduct)), 1);
+      const displayHistory = allHistory.slice(0, historyLimit);
+      const hasMore = allHistory.length > historyLimit;
+
+      return `
+        ${renderModalHeader('📊 ประวัติคลังอาหาร')}
+        <div class="p-4 overflow-y-auto">
+          <!-- Summary Section -->
+          <div class="bg-slate-700/30 rounded-xl p-4 mb-4">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-sm font-medium text-slate-300">📊 สรุปภาพรวม</h4>
+              <button onclick="downloadStockHistory()" class="px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 rounded-lg text-xs font-medium transition-colors flex items-center gap-1">
+                <span>⬇️</span> ดาวน์โหลด
+              </button>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mb-3">
+              <div class="bg-green-500/10 rounded-lg p-2 text-center">
+                <div class="text-lg font-bold text-green-400">${formatNumber(summary.totalAdd, 1)}</div>
+                <div class="text-[10px] text-slate-500">เพิ่ม (กก.)</div>
+              </div>
+              <div class="bg-red-500/10 rounded-lg p-2 text-center">
+                <div class="text-lg font-bold text-red-400">${formatNumber(summary.totalDeduct, 1)}</div>
+                <div class="text-[10px] text-slate-500">ใช้ (กก.)</div>
+              </div>
+              <div class="bg-slate-600/30 rounded-lg p-2 text-center">
+                <div class="text-lg font-bold ${summary.totalAdd - summary.totalDeduct >= 0 ? 'text-cyan-400' : 'text-amber-400'}">${summary.totalAdd - summary.totalDeduct >= 0 ? '+' : ''}${formatNumber(summary.totalAdd - summary.totalDeduct, 1)}</div>
+                <div class="text-[10px] text-slate-500">สุทธิ (กก.)</div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="bg-orange-500/10 rounded-lg p-2">
+                <div class="flex items-center gap-1 mb-1">
+                  <span>🟠</span>
+                  <span class="text-slate-400">อาหารสด</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-green-400">+${formatNumber(summary.byType.fresh.add, 1)}</span>
+                  <span class="text-red-400">-${formatNumber(summary.byType.fresh.deduct, 1)}</span>
+                </div>
+              </div>
+              <div class="bg-blue-500/10 rounded-lg p-2">
+                <div class="flex items-center gap-1 mb-1">
+                  <span>🔵</span>
+                  <span class="text-slate-400">อาหารเม็ด</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-green-400">+${formatNumber(summary.byType.pellet.add, 1)}</span>
+                  <span class="text-red-400">-${formatNumber(summary.byType.pellet.deduct, 1)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Weekly Chart -->
+          <div class="bg-slate-700/30 rounded-xl p-4 mb-4">
+            <h4 class="text-sm font-medium text-slate-300 mb-3">📈 อาหาร 7 วันล่าสุด</h4>
+            <div class="flex items-end justify-between gap-1" style="height: 100px;">
+              ${chartData.map(d => {
+                const addHeight = (d.add / maxValue) * 80;
+                const deductHeight = (d.deduct / maxValue) * 80;
+                return `
+                  <div class="flex-1 flex flex-col items-center">
+                    <div class="flex gap-0.5 items-end" style="height: 80px;">
+                      <div class="w-2 bg-green-500/60 rounded-t" style="height: ${addHeight}px;" title="เพิ่ม: ${formatNumber(d.add, 1)} กก."></div>
+                      <div class="w-2 bg-red-500/60 rounded-t" style="height: ${deductHeight}px;" title="ใช้: ${formatNumber(d.deduct, 1)} กก."></div>
+                    </div>
+                    <div class="text-[10px] text-slate-500 mt-1">${d.label}</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            <div class="flex justify-center gap-4 mt-3 text-xs">
+              <span class="flex items-center gap-1"><span class="w-2 h-2 bg-green-500/60 rounded"></span> เพิ่ม</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 bg-red-500/60 rounded"></span> ใช้</span>
+            </div>
+          </div>
+
+          <!-- History List -->
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-sm font-medium text-slate-300">📋 รายการทั้งหมด</h4>
+            <span class="text-xs text-slate-500">${allHistory.length} รายการ</span>
+          </div>
+          ${allHistory.length === 0 ? `
+            <div class="text-center py-6 text-slate-500">
+              <div class="text-3xl mb-2">📦</div>
+              <p class="text-sm">ยังไม่มีประวัติ</p>
+            </div>
+          ` : `
+            <div id="stockHistoryList" class="space-y-2 max-h-72 overflow-y-auto">
+              ${displayHistory.map(h => {
+                const date = new Date(h.date);
+                const dateStr = date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+                const timeStr = date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+                const icon = h.type === 'add' ? '➕' : h.type === 'deduct' ? '➖' : '🔄';
+                const color = h.type === 'add' ? 'text-green-400' : h.type === 'deduct' ? 'text-red-400' : 'text-amber-400';
+                const typeText = h.type === 'add' ? 'เพิ่ม' : h.type === 'deduct' ? 'ใช้' : 'ปรับ';
+                const qty = h.type === 'adjust' ? `${formatNumber(h.oldQuantity, 1)} → ${formatNumber(h.newQuantity, 1)}` : formatNumber(h.quantity, 1);
+
+                return `
+                  <div class="bg-slate-700/30 rounded-lg p-2.5 flex items-center gap-2">
+                    <span class="${h.feedType === 'fresh' ? 'text-orange-400' : 'text-blue-400'}">${h.feedType === 'fresh' ? '🟠' : '🔵'}</span>
+                    <div class="flex-1 min-w-0">
+                      <div class="text-sm text-slate-200 truncate">${h.feedName}</div>
+                      <div class="text-xs text-slate-500">${dateStr} ${timeStr} ${h.note ? `• ${h.note}` : ''}</div>
+                    </div>
+                    <div class="text-right">
+                      <div class="${color} text-sm font-medium">${icon} ${qty} กก.</div>
+                      <div class="text-xs text-slate-500">${typeText}</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            ${hasMore ? `
+              <button onclick="loadMoreStockHistory()" class="w-full mt-3 py-2.5 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                <span>⬇️</span> โหลดเพิ่ม (${allHistory.length - historyLimit} รายการ)
+              </button>
+            ` : `
+              <div class="text-center mt-3 text-xs text-slate-500">— แสดงทั้งหมดแล้ว —</div>
+            `}
+          `}
         </div>
       `;
     };
@@ -3236,6 +3551,45 @@
       if (result) setState({ modal: null });
     };
 
+    // Inventory Section Controls
+    window.toggleInventorySection = (sectionId) => {
+      const collapsed = state.inventoryCollapsed || {};
+      collapsed[sectionId] = !collapsed[sectionId];
+      setState({ inventoryCollapsed: { ...collapsed } });
+    };
+
+    window.collapseAllInventory = () => {
+      setState({
+        inventoryCollapsed: {
+          fishTypes: true,
+          feeds: true,
+          supplements: true,
+          medicines: true
+        }
+      });
+    };
+
+    window.expandAllInventory = () => {
+      setState({ inventoryCollapsed: {} });
+    };
+
+    window.filterInventory = (query) => {
+      const sections = document.getElementById('inventorySections');
+      if (!sections) return;
+
+      const items = sections.querySelectorAll('.bg-slate-800\\/40');
+      const q = query.toLowerCase().trim();
+
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (q === '' || text.includes(q)) {
+          item.style.display = '';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    };
+
     window.editFishType = (id) => {
       const ft = db.fishTypes.getById(id);
       if (ft) {
@@ -3412,6 +3766,25 @@
       if (totalCountEl) totalCountEl.textContent = formatNumber(totalCount) + ' ตัว';
     };
 
+    window.selectUndersizedAction = (action) => {
+      const priceSection = document.getElementById('undersizedPriceSection');
+      const actionText = document.getElementById('undersizedActionText');
+      const sellRadio = document.getElementById('actionSell');
+      const keepRadio = document.getElementById('actionKeep');
+
+      if (action === 'sell') {
+        priceSection?.classList.remove('hidden');
+        if (actionText) actionText.textContent = '(ขาย)';
+        if (sellRadio) sellRadio.checked = true;
+        if (keepRadio) keepRadio.checked = false;
+      } else {
+        priceSection?.classList.add('hidden');
+        if (actionText) actionText.textContent = '(เลี้ยงต่อ)';
+        if (sellRadio) sellRadio.checked = false;
+        if (keepRadio) keepRadio.checked = true;
+      }
+    };
+
     window.addHarvest = (e) => {
       e.preventDefault();
       const form = e.target;
@@ -3423,7 +3796,8 @@
       const soldWeight = parseFloat(form.soldWeight.value) || 0;
       const undersizedWeight = parseFloat(form.undersizedWeight.value) || 0;
       const soldPrice = parseFloat(form.soldPrice.value) || 0;
-      const undersizedPrice = parseFloat(form.undersizedPrice.value) || 0;
+      const undersizedAction = form.undersizedAction?.value || 'keep';
+      const undersizedPrice = undersizedAction === 'sell' ? (parseFloat(form.undersizedPrice?.value) || 0) : 0;
 
       // Calculate counts
       const soldCount = avgWeight > 0 ? Math.round((soldWeight * 1000) / avgWeight) : 0;
@@ -3432,8 +3806,8 @@
       const totalWeight = soldWeight + undersizedWeight;
       const totalCount = soldCount + undersizedCount;
 
-      // Calculate total revenue
-      const totalRevenue = (soldWeight * soldPrice) + (undersizedWeight * undersizedPrice);
+      // Calculate total revenue (undersized fish only if sold)
+      const totalRevenue = (soldWeight * soldPrice) + (undersizedAction === 'sell' ? undersizedWeight * undersizedPrice : 0);
 
       const result = db.harvests.create({
         cycleId: cycle.id,
@@ -3447,6 +3821,7 @@
         undersizedWeight: undersizedWeight,
         undersizedCount: undersizedCount,
         undersizedPrice: undersizedPrice,
+        undersizedAction: undersizedAction,
         pricePerKg: soldWeight > 0 ? soldPrice : undersizedPrice,
         totalRevenue: totalRevenue,
         isFinalHarvest: form.isFinal.checked
@@ -3766,6 +4141,343 @@
           setState({ modal: null, editingStockFeedId: null });
         }
       }
+    };
+
+    // Stock History Functions
+    window.loadMoreStockHistory = () => {
+      const currentLimit = state.stockHistoryLimit || 20;
+      setState({ stockHistoryLimit: currentLimit + 20 });
+    };
+
+    window.downloadStockHistory = () => {
+      const stocks = db.feedStock.getAll();
+      const feeds = db.feeds.getAll();
+
+      // Collect all history
+      const allHistory = [];
+      stocks.forEach(stock => {
+        const feed = feeds.find(f => f.id === stock.feedId);
+        if (stock.history && feed) {
+          stock.history.forEach(h => {
+            allHistory.push({
+              ...h,
+              feedName: feed.name,
+              feedType: feed.type
+            });
+          });
+        }
+      });
+
+      // Sort by date descending
+      allHistory.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      // Calculate summary
+      let totalAdd = 0, totalDeduct = 0;
+      const byFeed = {};
+      allHistory.forEach(h => {
+        if (h.type === 'add') totalAdd += h.quantity;
+        if (h.type === 'deduct') totalDeduct += h.quantity;
+        if (!byFeed[h.feedName]) byFeed[h.feedName] = { add: 0, deduct: 0, type: h.feedType };
+        if (h.type === 'add') byFeed[h.feedName].add += h.quantity;
+        if (h.type === 'deduct') byFeed[h.feedName].deduct += h.quantity;
+      });
+
+      // Generate report
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      let report = `รายงานประวัติคลังอาหาร\n`;
+      report += `วันที่ออกรายงาน: ${dateStr}\n`;
+      report += `${'='.repeat(50)}\n\n`;
+
+      report += `📊 สรุปภาพรวม\n`;
+      report += `-`.repeat(30) + `\n`;
+      report += `เพิ่มทั้งหมด: ${formatNumber(totalAdd, 1)} กก.\n`;
+      report += `ใช้ทั้งหมด: ${formatNumber(totalDeduct, 1)} กก.\n`;
+      report += `สุทธิ: ${formatNumber(totalAdd - totalDeduct, 1)} กก.\n\n`;
+
+      report += `📦 สรุปตามอาหาร\n`;
+      report += `-`.repeat(30) + `\n`;
+      Object.entries(byFeed).forEach(([name, data]) => {
+        const typeIcon = data.type === 'fresh' ? '🟠' : '🔵';
+        report += `${typeIcon} ${name}\n`;
+        report += `   เพิ่ม: +${formatNumber(data.add, 1)} กก. | ใช้: -${formatNumber(data.deduct, 1)} กก.\n`;
+      });
+
+      report += `\n📋 รายการทั้งหมด (${allHistory.length} รายการ)\n`;
+      report += `-`.repeat(30) + `\n`;
+      allHistory.forEach(h => {
+        const date = new Date(h.date);
+        const dateStr = date.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        const timeStr = date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        const typeIcon = h.feedType === 'fresh' ? '🟠' : '🔵';
+        const actionIcon = h.type === 'add' ? '➕' : h.type === 'deduct' ? '➖' : '🔄';
+        const qty = h.type === 'adjust' ? `${formatNumber(h.oldQuantity, 1)} → ${formatNumber(h.newQuantity, 1)}` : formatNumber(h.quantity, 1);
+        report += `${dateStr} ${timeStr} | ${typeIcon} ${h.feedName} | ${actionIcon} ${qty} กก.${h.note ? ` (${h.note})` : ''}\n`;
+      });
+
+      // Download as text file
+      const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `stock-history-${now.toISOString().split('T')[0]}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast('ดาวน์โหลดรายงานสำเร็จ', 'success');
+    };
+
+    // Export Functions
+    window.exportFeedingData = () => {
+      const feedingLogs = storage.get(KEYS.FEEDING_LOGS);
+      const feeds = db.feeds.getAll();
+      const supplements = db.supplements.getAll();
+      const medicines = db.medicines.getAll();
+      const ponds = db.ponds.getAll();
+      const cycles = storage.get(KEYS.CYCLES);
+
+      if (feedingLogs.length === 0) {
+        showToast('ไม่มีข้อมูลการให้อาหาร', 'error');
+        return;
+      }
+
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      // Generate detailed report
+      let report = `รายงานการให้อาหาร - Fish Farm Pro\n`;
+      report += `วันที่ออกรายงาน: ${dateStr}\n`;
+      report += `${'='.repeat(60)}\n\n`;
+
+      // Summary
+      const totalFeedings = feedingLogs.filter(l => !l.medicineOnly).length;
+      const totalWeight = feedingLogs.reduce((s, l) => s + (l.weightKg || 0), 0);
+      const medicineOnlyCount = feedingLogs.filter(l => l.medicineOnly).length;
+
+      report += `📊 สรุปภาพรวม\n`;
+      report += `-`.repeat(40) + `\n`;
+      report += `จำนวนมื้ออาหารทั้งหมด: ${totalFeedings} มื้อ\n`;
+      report += `น้ำหนักอาหารรวม: ${formatNumber(totalWeight, 2)} กก.\n`;
+      report += `จำนวนครั้งให้ยา (ไม่มีอาหาร): ${medicineOnlyCount} ครั้ง\n\n`;
+
+      // Group by pond/cycle
+      const byCycle = {};
+      feedingLogs.forEach(log => {
+        if (!byCycle[log.cycleId]) byCycle[log.cycleId] = [];
+        byCycle[log.cycleId].push(log);
+      });
+
+      Object.entries(byCycle).forEach(([cycleId, logs]) => {
+        const cycle = cycles.find(c => c.id === cycleId);
+        const pond = cycle ? ponds.find(p => p.id === cycle.pondId) : null;
+        const pondName = pond?.name || 'บ่อไม่ระบุ';
+        const cycleStart = cycle ? new Date(cycle.startDate).toLocaleDateString('th-TH') : '-';
+
+        report += `\n🔲 ${pondName} (เริ่ม: ${cycleStart})\n`;
+        report += `-`.repeat(40) + `\n`;
+
+        const cycleWeight = logs.reduce((s, l) => s + (l.weightKg || 0), 0);
+        report += `รวม: ${logs.length} มื้อ, ${formatNumber(cycleWeight, 2)} กก.\n\n`;
+
+        logs.sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(log => {
+          const date = new Date(log.date);
+          const dateStr = date.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' });
+          const feed = feeds.find(f => f.id === log.feedId);
+          const feedName = feed?.name || (log.medicineOnly ? 'ให้ยาอย่างเดียว' : '-');
+
+          report += `${dateStr} ${log.time} | ${feedName}`;
+          if (!log.medicineOnly) report += ` | ${formatNumber(log.weightKg, 2)} กก.`;
+
+          // Supplements
+          if (log.supplements?.length > 0) {
+            const suppList = log.supplements.map(s => {
+              const supp = supplements.find(sp => sp.id === s.supplementId);
+              return `${supp?.name || '-'} ${s.amount}${s.unit}`;
+            }).join(', ');
+            report += ` | วิตามิน: ${suppList}`;
+          }
+
+          // Medicines
+          if (log.medicines?.length > 0) {
+            const medList = log.medicines.map(m => {
+              const med = medicines.find(md => md.id === m.medicineId);
+              return `${med?.name || '-'} ${m.amount}${m.unit}`;
+            }).join(', ');
+            report += ` | ยา: ${medList}`;
+          }
+
+          if (log.notes) report += ` | หมายเหตุ: ${log.notes}`;
+          report += `\n`;
+
+          // Edit history
+          if (log.editHistory?.length > 0) {
+            log.editHistory.forEach(h => {
+              const editDate = new Date(h.editedAt).toLocaleDateString('th-TH');
+              report += `   └ แก้ไขเมื่อ ${editDate}: ${formatNumber(h.prev.weightKg, 2)} กก. → ปัจจุบัน\n`;
+            });
+          }
+        });
+      });
+
+      // Download
+      downloadFile(report, `feeding-data-${now.toISOString().split('T')[0]}.txt`, 'text/plain');
+      showToast('ส่งออกข้อมูลการให้อาหารสำเร็จ', 'success');
+    };
+
+    window.exportStockData = () => {
+      const stocks = db.feedStock.getAll();
+      const feeds = db.feeds.getAll();
+
+      if (stocks.length === 0) {
+        showToast('ไม่มีข้อมูลคลังอาหาร', 'error');
+        return;
+      }
+
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      let report = `รายงานคลังอาหาร - Fish Farm Pro\n`;
+      report += `วันที่ออกรายงาน: ${dateStr}\n`;
+      report += `${'='.repeat(60)}\n\n`;
+
+      // Current stock summary
+      report += `📦 สต็อกปัจจุบัน\n`;
+      report += `-`.repeat(40) + `\n`;
+
+      let totalStock = 0;
+      stocks.forEach(stock => {
+        const feed = feeds.find(f => f.id === stock.feedId);
+        if (feed) {
+          const typeIcon = feed.type === 'fresh' ? '🟠' : '🔵';
+          report += `${typeIcon} ${feed.name}: ${formatNumber(stock.stock, 2)} กก.\n`;
+          totalStock += stock.stock;
+        }
+      });
+      report += `\nรวมทั้งหมด: ${formatNumber(totalStock, 2)} กก.\n\n`;
+
+      // History by feed
+      stocks.forEach(stock => {
+        const feed = feeds.find(f => f.id === stock.feedId);
+        if (!feed || !stock.history?.length) return;
+
+        const typeIcon = feed.type === 'fresh' ? '🟠' : '🔵';
+        report += `\n${typeIcon} ${feed.name} - ประวัติการเปลี่ยนแปลง\n`;
+        report += `-`.repeat(40) + `\n`;
+
+        const totalAdd = stock.history.filter(h => h.type === 'add').reduce((s, h) => s + h.quantity, 0);
+        const totalDeduct = stock.history.filter(h => h.type === 'deduct').reduce((s, h) => s + h.quantity, 0);
+        report += `สรุป: เพิ่ม ${formatNumber(totalAdd, 2)} กก. | ใช้ ${formatNumber(totalDeduct, 2)} กก.\n\n`;
+
+        stock.history.sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(h => {
+          const date = new Date(h.date);
+          const dateStr = date.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' });
+          const timeStr = date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+          const actionIcon = h.type === 'add' ? '➕' : h.type === 'deduct' ? '➖' : '🔄';
+          const qty = h.type === 'adjust' ? `${formatNumber(h.oldQuantity, 2)} → ${formatNumber(h.newQuantity, 2)}` : formatNumber(h.quantity, 2);
+
+          report += `${dateStr} ${timeStr} | ${actionIcon} ${qty} กก.`;
+          if (h.note) report += ` | ${h.note}`;
+          if (h.pondName) report += ` | บ่อ: ${h.pondName}`;
+          report += `\n`;
+        });
+      });
+
+      downloadFile(report, `stock-data-${now.toISOString().split('T')[0]}.txt`, 'text/plain');
+      showToast('ส่งออกข้อมูลคลังอาหารสำเร็จ', 'success');
+    };
+
+    window.exportAllDataCSV = () => {
+      const feedingLogs = storage.get(KEYS.FEEDING_LOGS);
+      const stocks = db.feedStock.getAll();
+      const feeds = db.feeds.getAll();
+      const ponds = db.ponds.getAll();
+      const cycles = storage.get(KEYS.CYCLES);
+      const supplements = db.supplements.getAll();
+      const medicines = db.medicines.getAll();
+
+      const now = new Date();
+
+      // Feeding Logs CSV
+      let feedingCSV = 'วันที่,เวลา,บ่อ,ชนิดปลา,อาหาร,น้ำหนัก(กก.),วิตามิน,ยา,หมายเหตุ\n';
+      feedingLogs.forEach(log => {
+        const cycle = cycles.find(c => c.id === log.cycleId);
+        const pond = cycle ? ponds.find(p => p.id === cycle.pondId) : null;
+        const feed = feeds.find(f => f.id === log.feedId);
+        const date = new Date(log.date).toLocaleDateString('th-TH');
+        const suppList = (log.supplements || []).map(s => {
+          const supp = supplements.find(sp => sp.id === s.supplementId);
+          return `${supp?.name || '-'}(${s.amount}${s.unit})`;
+        }).join('; ');
+        const medList = (log.medicines || []).map(m => {
+          const med = medicines.find(md => md.id === m.medicineId);
+          return `${med?.name || '-'}(${m.amount}${m.unit})`;
+        }).join('; ');
+
+        feedingCSV += `"${date}","${log.time}","${pond?.name || '-'}","${cycle?.fishType || '-'}","${feed?.name || (log.medicineOnly ? 'ให้ยาอย่างเดียว' : '-')}",${log.weightKg || 0},"${suppList}","${medList}","${log.notes || ''}"\n`;
+      });
+
+      // Stock History CSV
+      let stockCSV = 'วันที่,เวลา,อาหาร,ประเภท,การกระทำ,จำนวน(กก.),หมายเหตุ,บ่อ\n';
+      stocks.forEach(stock => {
+        const feed = feeds.find(f => f.id === stock.feedId);
+        if (!feed || !stock.history) return;
+
+        stock.history.forEach(h => {
+          const date = new Date(h.date);
+          const dateStr = date.toLocaleDateString('th-TH');
+          const timeStr = date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+          const action = h.type === 'add' ? 'เพิ่ม' : h.type === 'deduct' ? 'ใช้' : 'ปรับ';
+          const qty = h.type === 'adjust' ? `${h.oldQuantity} → ${h.newQuantity}` : h.quantity;
+
+          stockCSV += `"${dateStr}","${timeStr}","${feed.name}","${feed.type === 'fresh' ? 'อาหารสด' : 'อาหารเม็ด'}","${action}",${qty},"${h.note || ''}","${h.pondName || ''}"\n`;
+        });
+      });
+
+      // Create zip-like combined file
+      const combined = `=== ข้อมูลการให้อาหาร ===\n${feedingCSV}\n\n=== ข้อมูลคลังอาหาร ===\n${stockCSV}`;
+
+      downloadFile(combined, `fish-farm-data-${now.toISOString().split('T')[0]}.csv`, 'text/csv');
+      showToast('ส่งออกข้อมูล CSV สำเร็จ', 'success');
+    };
+
+    window.exportAllDataJSON = () => {
+      const allData = {
+        exportDate: new Date().toISOString(),
+        appVersion: 'Fish Farm Pro v1.2',
+        data: {
+          ponds: db.ponds.getAll(),
+          fishTypes: db.fishTypes.getAll(),
+          feeds: db.feeds.getAll(),
+          supplements: db.supplements.getAll(),
+          medicines: db.medicines.getAll(),
+          cycles: storage.get(KEYS.CYCLES),
+          feedingLogs: storage.get(KEYS.FEEDING_LOGS),
+          feedStock: db.feedStock.getAll(),
+          waterQuality: storage.get(KEYS.WATER_QUALITY),
+          expenses: storage.get(KEYS.EXPENSES),
+          harvests: storage.get(KEYS.HARVESTS)
+        }
+      };
+
+      const json = JSON.stringify(allData, null, 2);
+      downloadFile(json, `fish-farm-backup-${new Date().toISOString().split('T')[0]}.json`, 'application/json');
+      showToast('สำรองข้อมูลสำเร็จ', 'success');
+    };
+
+    // Helper function to download files
+    const downloadFile = (content, filename, mimeType) => {
+      const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     };
 
     // Stock Password Functions
