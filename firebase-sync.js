@@ -940,23 +940,25 @@ const updateSyncStatus = () => {
 
   if (isLocalOnly()) {
     indicator.className = 'sync-indicator sync-local';
-    indicator.title = '🔒 Offline Mode - คลิกเพื่อเปลี่ยน';
+    indicator.title = '📴 Offline Mode';
   } else if (isSyncing) {
     indicator.className = 'sync-indicator sync-syncing';
     indicator.title = '🔄 กำลัง Sync...';
   } else if (isOnline) {
     indicator.className = 'sync-indicator sync-online';
-    indicator.title = `✓ ${provider?.name || 'Cloud'} - เชื่อมต่อแล้ว`;
+    indicator.title = `☁️ ${provider?.name || 'Cloud'}`;
   } else {
     indicator.className = 'sync-indicator sync-offline';
-    indicator.title = '✕ ไม่ได้เชื่อมต่อ Cloud - คลิกเพื่อตั้งค่า';
+    indicator.title = '⚠️ ไม่ได้เชื่อมต่อ';
   }
 };
 
 // ===== Setup Modal =====
+let isAuthenticated = false; // ตรวจสอบว่ายืนยันตัวตนแล้วหรือยัง
+
 const showSyncSetupModal = () => {
-  // ถ้าล็อค offline อยู่ ต้องใส่รหัสผ่านก่อน
-  if (isOfflineLocked() && isLocalOnly()) {
+  // ต้องยืนยันรหัสผ่านก่อนเข้าตั้งค่าเสมอ
+  if (!isAuthenticated) {
     showUnlockModal();
     return;
   }
@@ -1199,11 +1201,11 @@ window.verifyMasterKey = () => {
 
   if (masterKey === MASTER_KEY) {
     resetPassword();
-    localStorage.removeItem(LOCAL_ONLY_KEY);
+    isAuthenticated = true;
     closeForgotPasswordModal();
     showToast('รีเซ็ตรหัสผ่านสำเร็จ (รหัสใหม่: ' + DEFAULT_PASSWORD + ')', 'success');
     updateSyncStatus();
-    setTimeout(() => showSyncSetupModal(), 300);
+    setTimeout(() => showSyncSetupModal(), 100);
   } else {
     showToast('มาสเตอร์คีย์ไม่ถูกต้อง', 'error');
     document.getElementById('master-key-input').value = '';
@@ -1306,16 +1308,15 @@ window.unlockOffline = () => {
 
   if (verifyPassword(password)) {
     // Unlock successful
-    localStorage.removeItem(LOCAL_ONLY_KEY);
+    isAuthenticated = true;
 
     closeUnlockModal();
     showToast('ยืนยันสำเร็จ', 'success');
-    updateSyncStatus();
 
     // Show setup modal
     setTimeout(() => {
       showSyncSetupModal();
-    }, 300);
+    }, 100);
   } else {
     showToast('รหัสผ่านไม่ถูกต้อง', 'error');
     document.getElementById('unlock-password').value = '';
@@ -1331,6 +1332,7 @@ window.closeUnlockModal = () => {
 window.closeSyncModal = () => {
   const modal = document.getElementById('sync-setup-modal');
   if (modal) modal.remove();
+  isAuthenticated = false; // รีเซ็ตสถานะยืนยันตัวตน
 };
 
 window.showSyncSetup = showSyncSetupModal;
