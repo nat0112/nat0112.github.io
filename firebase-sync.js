@@ -871,10 +871,8 @@ const createSyncStatusUI = () => {
   const indicator = document.createElement('div');
   indicator.id = 'sync-status';
   indicator.className = 'sync-indicator sync-offline';
-  indicator.innerHTML = `
-    <span id="sync-icon">●</span>
-    <span id="sync-text">Offline</span>
-  `;
+  indicator.innerHTML = `<span id="sync-icon">●</span>`;
+  indicator.title = 'Cloud Sync Status - คลิกเพื่อตั้งค่า';
   indicator.onclick = () => showSyncSetupModal();
   indicator.style.cursor = 'pointer';
   document.body.appendChild(indicator);
@@ -885,24 +883,32 @@ const createSyncStatusUI = () => {
     style.textContent = `
       .sync-indicator {
         position: fixed;
-        top: 12px;
-        right: 12px;
+        top: 8px;
+        right: 8px;
         z-index: 50;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        font-size: 12px;
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        border-radius: 9999px;
-        font-size: 12px;
-        backdrop-filter: blur(8px);
+        justify-content: center;
         transition: all 0.3s ease;
+        opacity: 0.8;
       }
-      .sync-online { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-      .sync-offline { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-      .sync-syncing { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-      .sync-local { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      .animate-spin { animation: spin 1s linear infinite; display: inline-block; }
+      .sync-indicator:hover {
+        opacity: 1;
+        transform: scale(1.5);
+      }
+      .sync-online { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+      .sync-online span { display: none; }
+      .sync-offline { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+      .sync-offline span { display: none; }
+      .sync-syncing { background: #3b82f6; box-shadow: 0 0 8px #3b82f6; animation: pulse 1s infinite; }
+      .sync-syncing span { display: none; }
+      .sync-local { background: #94a3b8; box-shadow: 0 0 4px #94a3b8; }
+      .sync-local span { display: none; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     `;
     document.head.appendChild(style);
   }
@@ -912,34 +918,21 @@ const updateSyncStatus = () => {
   const indicator = document.getElementById('sync-status');
   if (!indicator) return;
 
-  const icon = document.getElementById('sync-icon');
-  const text = document.getElementById('sync-text');
+  // อัพเดท tooltip
   const provider = PROVIDERS[currentProvider];
 
   if (isLocalOnly()) {
     indicator.className = 'sync-indicator sync-local';
-    if (isOfflineLocked()) {
-      icon.textContent = '🔒';
-      text.textContent = 'Offline (ล็อค)';
-    } else {
-      icon.textContent = '○';
-      text.textContent = 'Local Only';
-    }
+    indicator.title = '🔒 Offline Mode - คลิกเพื่อเปลี่ยน';
   } else if (isSyncing) {
     indicator.className = 'sync-indicator sync-syncing';
-    icon.innerHTML = '↻';
-    icon.className = 'animate-spin';
-    text.textContent = 'Syncing...';
+    indicator.title = '🔄 กำลัง Sync...';
   } else if (isOnline) {
     indicator.className = 'sync-indicator sync-online';
-    icon.textContent = provider?.icon || '●';
-    icon.className = '';
-    text.textContent = provider?.name || 'Online';
+    indicator.title = `✓ ${provider?.name || 'Cloud'} - เชื่อมต่อแล้ว`;
   } else {
     indicator.className = 'sync-indicator sync-offline';
-    icon.textContent = '●';
-    icon.className = '';
-    text.textContent = 'Offline';
+    indicator.title = '✕ ไม่ได้เชื่อมต่อ Cloud - คลิกเพื่อตั้งค่า';
   }
 };
 
@@ -1300,6 +1293,30 @@ window.resetSyncConfig = () => {
 };
 
 // ===== Enhanced Storage =====
+let syncDebounceTimer = null;
+let pendingSyncKeys = new Set();
+
+const debouncedSyncToCloud = () => {
+  if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+
+  syncDebounceTimer = setTimeout(async () => {
+    if (!providerInstance || !isOnline || isLocalOnly()) return;
+
+    isSyncing = true;
+    updateSyncStatus();
+
+    try {
+      await providerInstance.syncToCloud?.();
+      pendingSyncKeys.clear();
+    } catch (err) {
+      console.error('Debounced sync error:', err);
+    }
+
+    isSyncing = false;
+    updateSyncStatus();
+  }, 2000); // Sync หลังจากไม่มีการเปลี่ยนแปลง 2 วินาที
+};
+
 const enhanceStorageWithSync = () => {
   if (!window.storage) return;
 
@@ -1308,14 +1325,26 @@ const enhanceStorageWithSync = () => {
   window.storage.set = (key, data) => {
     const result = originalSet.call(window.storage, key, data);
 
-    if (providerInstance && isOnline && !isLocalOnly() && SYNC_KEYS.includes(key)) {
-      providerInstance.set?.(key, data).catch(err => {
-        console.error('Sync error:', err);
-      });
+    if (providerInstance && !isLocalOnly() && SYNC_KEYS.includes(key)) {
+      pendingSyncKeys.add(key);
+      debouncedSyncToCloud();
     }
 
     return result;
   };
+};
+
+// Periodic sync ทุก 30 วินาที เพื่อให้แน่ใจว่าข้อมูลตรงกัน
+const startPeriodicSync = () => {
+  setInterval(async () => {
+    if (!providerInstance || !isOnline || isLocalOnly() || isSyncing) return;
+
+    try {
+      await providerInstance.syncFromCloud?.();
+    } catch (err) {
+      console.error('Periodic sync error:', err);
+    }
+  }, 30000);
 };
 
 // ===== Initialization =====
@@ -1327,19 +1356,35 @@ const initCloudSync = async () => {
     return;
   }
 
-  const savedConfig = getSyncConfig();
-  if (savedConfig?.provider && savedConfig?.config) {
-    currentProvider = savedConfig.provider;
-    const adapter = adapters[currentProvider];
+  // ใช้ config ที่บันทึกไว้ หรือใช้ Firebase เริ่มต้นอัตโนมัติ
+  let savedConfig = getSyncConfig();
 
-    if (adapter) {
-      providerInstance = adapter;
-      if (await adapter.init(savedConfig.config)) {
-        adapter.setupListeners?.(() => {
-          if (window.render) window.render();
-        });
-        enhanceStorageWithSync();
-      }
+  // ถ้ายังไม่มี config ให้ใช้ Firebase เริ่มต้นทันที (auto-connect)
+  if (!savedConfig?.provider || !savedConfig?.config) {
+    savedConfig = {
+      provider: 'firebase',
+      config: PROVIDERS.firebase.defaultConfig
+    };
+    // บันทึก config เพื่อใช้ครั้งต่อไป
+    saveSyncConfig('firebase', PROVIDERS.firebase.defaultConfig);
+  }
+
+  currentProvider = savedConfig.provider;
+  const adapter = adapters[currentProvider];
+
+  if (adapter) {
+    providerInstance = adapter;
+    if (await adapter.init(savedConfig.config)) {
+      adapter.setupListeners?.(() => {
+        if (window.render) window.render();
+      });
+      enhanceStorageWithSync();
+      startPeriodicSync();
+
+      // Sync ข้อมูลทันทีเมื่อเชื่อมต่อสำเร็จ
+      setTimeout(() => {
+        adapter.syncFromCloud?.();
+      }, 1000);
     }
   }
 };
@@ -1350,6 +1395,25 @@ if (document.readyState === 'loading') {
 } else {
   initCloudSync();
 }
+
+// Sync เมื่อผู้ใช้กลับมาใช้แอพ
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && providerInstance && isOnline && !isLocalOnly()) {
+    try {
+      await providerInstance.syncFromCloud?.();
+      if (window.render) window.render();
+    } catch (err) {
+      console.error('Visibility sync error:', err);
+    }
+  }
+});
+
+// Sync ก่อนปิดหน้า (upload pending changes)
+window.addEventListener('beforeunload', () => {
+  if (pendingSyncKeys.size > 0 && providerInstance && isOnline && !isLocalOnly()) {
+    providerInstance.syncToCloud?.();
+  }
+});
 
 // Export
 window.cloudSync = {
