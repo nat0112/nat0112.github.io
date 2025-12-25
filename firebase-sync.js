@@ -837,7 +837,11 @@ const saveSyncConfig = (provider, config) => {
 };
 
 const isLocalOnly = () => localStorage.getItem(LOCAL_ONLY_KEY) === 'true';
-const isOfflineLocked = () => !!localStorage.getItem(OFFLINE_LOCK_KEY);
+// Offline mode ถูกล็อคเสมอ (ใช้รหัสเริ่มต้นหรือ custom)
+const isOfflineLocked = () => isLocalOnly();
+
+// Default password for offline lock
+const DEFAULT_LOCK_PASSWORD = '5280';
 
 // Simple hash function for password
 const hashPassword = (password) => {
@@ -852,6 +856,10 @@ const hashPassword = (password) => {
 
 const verifyOfflineLock = (password) => {
   const stored = localStorage.getItem(OFFLINE_LOCK_KEY);
+  // ถ้ายังไม่มี custom password ให้ใช้รหัสเริ่มต้น
+  if (!stored) {
+    return password === DEFAULT_LOCK_PASSWORD;
+  }
   return stored === hashPassword(password);
 };
 
@@ -983,9 +991,14 @@ const showSyncSetupModal = () => {
         <button onclick="saveAndConnect()" class="w-full py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-semibold transition-colors">
           💾 บันทึกและเชื่อมต่อ
         </button>
-        <button onclick="useLocalOnly()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
-          ใช้งานแบบ Offline เท่านั้น
-        </button>
+        <div class="flex gap-2">
+          <button onclick="useLocalOnly()" class="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors text-sm">
+            🔒 Offline (รหัส: ${DEFAULT_LOCK_PASSWORD})
+          </button>
+          <button onclick="useLocalOnlyWithCustomPassword()" class="py-2 px-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 rounded-xl transition-colors text-sm">
+            ✏️ ตั้งรหัสเอง
+          </button>
+        </div>
         <button onclick="closeSyncModal()" class="w-full py-2 text-slate-400 hover:text-slate-300 text-sm">
           ยกเลิก
         </button>
@@ -1085,6 +1098,17 @@ window.saveAndConnect = async () => {
 };
 
 window.useLocalOnly = () => {
+  // ใช้รหัสเริ่มต้น 5280 โดยอัตโนมัติ
+  localStorage.setItem(LOCAL_ONLY_KEY, 'true');
+  localStorage.removeItem(OFFLINE_LOCK_KEY); // ใช้รหัสเริ่มต้น
+
+  closeSyncModal();
+  updateSyncStatus();
+  showToast(`เปิด Offline Mode (รหัส: ${DEFAULT_LOCK_PASSWORD})`, 'success');
+  if (window.render) window.render();
+};
+
+window.useLocalOnlyWithCustomPassword = () => {
   showOfflineLockModal();
 };
 
@@ -1212,7 +1236,8 @@ const showUnlockModal = () => {
       </div>
 
       <div class="mt-4 pt-4 border-t border-slate-700">
-        <p class="text-xs text-slate-500 text-center">ลืมรหัสผ่าน? ต้องล้างข้อมูลแอพทั้งหมด</p>
+        <p class="text-xs text-slate-500 text-center">รหัสเริ่มต้น: <span class="text-cyan-400 font-mono">${DEFAULT_LOCK_PASSWORD}</span></p>
+        <p class="text-xs text-slate-500 text-center mt-1">ลืมรหัสผ่าน? ต้องล้างข้อมูลแอพทั้งหมด</p>
       </div>
     </div>
   `;
