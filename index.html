@@ -203,9 +203,9 @@
       { id: 'red_tilapia', name: 'ปลาทับทิม', feedType: 'pellet', avgWeight: 600 }
     ];
 
-    // Helper to get fish types from storage
+    // Helper to get fish types from storage (filters deleted)
     const getFishTypes = () => {
-      const types = storage.get(KEYS.FISH_TYPES);
+      const types = storage.get(KEYS.FISH_TYPES).filter(t => !t?.deleted);
       return types.length > 0 ? types : DEFAULT_FISH_TYPES;
     };
 
@@ -345,11 +345,14 @@
       }
     };
 
+    // ===== Helper: Filter deleted records =====
+    const filterDeleted = (items) => (items || []).filter(item => !item?.deleted);
+
     // ===== Database with validation =====
     const db = {
       ponds: {
-        getAll: () => storage.get(KEYS.PONDS),
-        getById: (id) => storage.get(KEYS.PONDS).find(p => p.id === id),
+        getAll: () => filterDeleted(storage.get(KEYS.PONDS)),
+        getById: (id) => filterDeleted(storage.get(KEYS.PONDS)).find(p => p.id === id),
         create: (name) => {
           if (!validate.required(name, 'ชื่อบ่อ')) return null;
           const ponds = storage.get(KEYS.PONDS);
@@ -374,23 +377,17 @@
           }
         },
         delete: (id) => {
-          // Also delete related cycles and their data
-          const cycles = storage.get(KEYS.CYCLES).filter(c => c.pondId === id);
+          // Cascading soft delete: related cycles and their data
+          const cycles = storage.get(KEYS.CYCLES).filter(c => c.pondId === id && !c.deleted);
           cycles.forEach(cycle => {
-            // Mark related records as deleted for sync
-            storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId === cycle.id).forEach(l => window.markAsDeleted?.(KEYS.FEEDING_LOGS, l.id));
-            storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId === cycle.id).forEach(w => window.markAsDeleted?.(KEYS.WATER_QUALITY, w.id));
-            storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycle.id).forEach(e => window.markAsDeleted?.(KEYS.EXPENSES, e.id));
-            storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycle.id).forEach(h => window.markAsDeleted?.(KEYS.HARVESTS, h.id));
-            storage.set(KEYS.FEEDING_LOGS, storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId !== cycle.id));
-            storage.set(KEYS.WATER_QUALITY, storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId !== cycle.id));
-            storage.set(KEYS.EXPENSES, storage.get(KEYS.EXPENSES).filter(e => e.cycleId !== cycle.id));
-            storage.set(KEYS.HARVESTS, storage.get(KEYS.HARVESTS).filter(h => h.cycleId !== cycle.id));
+            // Soft delete related records
+            storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId === cycle.id && !l.deleted).forEach(l => window.markAsDeleted?.(KEYS.FEEDING_LOGS, l.id));
+            storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId === cycle.id && !w.deleted).forEach(w => window.markAsDeleted?.(KEYS.WATER_QUALITY, w.id));
+            storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycle.id && !e.deleted).forEach(e => window.markAsDeleted?.(KEYS.EXPENSES, e.id));
+            storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycle.id && !h.deleted).forEach(h => window.markAsDeleted?.(KEYS.HARVESTS, h.id));
             window.markAsDeleted?.(KEYS.CYCLES, cycle.id);
           });
-          storage.set(KEYS.CYCLES, storage.get(KEYS.CYCLES).filter(c => c.pondId !== id));
           window.markAsDeleted?.(KEYS.PONDS, id);
-          storage.set(KEYS.PONDS, storage.get(KEYS.PONDS).filter(p => p.id !== id));
           showToast('ลบบ่อสำเร็จ', 'success');
         }
       },
@@ -447,15 +444,13 @@
             types = [...DEFAULT_FISH_TYPES];
           }
           window.markAsDeleted?.(KEYS.FISH_TYPES, id);
-          types = types.filter(t => t.id !== id);
-          storage.set(KEYS.FISH_TYPES, types);
           showToast('ลบชนิดปลาสำเร็จ', 'success');
         }
       },
       cycles: {
-        getAll: () => storage.get(KEYS.CYCLES),
-        getActive: (pondId) => storage.get(KEYS.CYCLES).find(c => c.pondId === pondId && c.status === 'active'),
-        getCompleted: (pondId) => storage.get(KEYS.CYCLES).filter(c => c.pondId === pondId && c.status === 'completed'),
+        getAll: () => filterDeleted(storage.get(KEYS.CYCLES)),
+        getActive: (pondId) => filterDeleted(storage.get(KEYS.CYCLES)).find(c => c.pondId === pondId && c.status === 'active'),
+        getCompleted: (pondId) => filterDeleted(storage.get(KEYS.CYCLES)).filter(c => c.pondId === pondId && c.status === 'completed'),
         create: (data) => {
           if (!validate.positiveNumber(data.initialCount, 'จำนวนปลา')) return null;
           if (!validate.positiveNumber(data.pricePerFish, 'ราคาต่อตัว')) return null;
@@ -484,25 +479,20 @@
         reset: (pondId) => {
           const cycle = db.cycles.getActive(pondId);
           if (cycle) {
-            // Mark related records as deleted for sync
-            storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId === cycle.id).forEach(l => window.markAsDeleted?.(KEYS.FEEDING_LOGS, l.id));
-            storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId === cycle.id).forEach(w => window.markAsDeleted?.(KEYS.WATER_QUALITY, w.id));
-            storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycle.id).forEach(e => window.markAsDeleted?.(KEYS.EXPENSES, e.id));
-            storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycle.id).forEach(h => window.markAsDeleted?.(KEYS.HARVESTS, h.id));
-            storage.set(KEYS.FEEDING_LOGS, storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId !== cycle.id));
-            storage.set(KEYS.WATER_QUALITY, storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId !== cycle.id));
-            storage.set(KEYS.EXPENSES, storage.get(KEYS.EXPENSES).filter(e => e.cycleId !== cycle.id));
-            storage.set(KEYS.HARVESTS, storage.get(KEYS.HARVESTS).filter(h => h.cycleId !== cycle.id));
+            // Soft delete related records
+            storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId === cycle.id && !l.deleted).forEach(l => window.markAsDeleted?.(KEYS.FEEDING_LOGS, l.id));
+            storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId === cycle.id && !w.deleted).forEach(w => window.markAsDeleted?.(KEYS.WATER_QUALITY, w.id));
+            storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycle.id && !e.deleted).forEach(e => window.markAsDeleted?.(KEYS.EXPENSES, e.id));
+            storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycle.id && !h.deleted).forEach(h => window.markAsDeleted?.(KEYS.HARVESTS, h.id));
             window.markAsDeleted?.(KEYS.CYCLES, cycle.id);
-            storage.set(KEYS.CYCLES, storage.get(KEYS.CYCLES).filter(c => c.id !== cycle.id));
             db.ponds.update(pondId, { status: 'empty' });
             showToast('รีเซ็ตบ่อสำเร็จ', 'success');
           }
         }
       },
       feeds: {
-        getAll: () => storage.get(KEYS.FEEDS),
-        getById: (id) => storage.get(KEYS.FEEDS).find(f => f.id === id),
+        getAll: () => filterDeleted(storage.get(KEYS.FEEDS)),
+        getById: (id) => filterDeleted(storage.get(KEYS.FEEDS)).find(f => f.id === id),
         create: (data) => {
           if (!validate.required(data.name, 'ชื่ออาหาร')) return null;
           if (!validate.positiveNumber(data.pricePerKg, 'ราคา')) return null;
@@ -533,13 +523,12 @@
         },
         delete: (id) => {
           window.markAsDeleted?.(KEYS.FEEDS, id);
-          storage.set(KEYS.FEEDS, storage.get(KEYS.FEEDS).filter(f => f.id !== id));
           showToast('ลบอาหารสำเร็จ', 'success');
         }
       },
       supplements: {
-        getAll: () => storage.get(KEYS.SUPPLEMENTS),
-        getById: (id) => storage.get(KEYS.SUPPLEMENTS).find(s => s.id === id),
+        getAll: () => filterDeleted(storage.get(KEYS.SUPPLEMENTS)),
+        getById: (id) => filterDeleted(storage.get(KEYS.SUPPLEMENTS)).find(s => s.id === id),
         create: (data) => {
           if (!validate.required(data.name, 'ชื่อวิตามิน')) return null;
 
@@ -569,13 +558,12 @@
         },
         delete: (id) => {
           window.markAsDeleted?.(KEYS.SUPPLEMENTS, id);
-          storage.set(KEYS.SUPPLEMENTS, storage.get(KEYS.SUPPLEMENTS).filter(s => s.id !== id));
           showToast('ลบวิตามินสำเร็จ', 'success');
         }
       },
       medicines: {
-        getAll: () => storage.get(KEYS.MEDICINES),
-        getById: (id) => storage.get(KEYS.MEDICINES).find(m => m.id === id),
+        getAll: () => filterDeleted(storage.get(KEYS.MEDICINES)),
+        getById: (id) => filterDeleted(storage.get(KEYS.MEDICINES)).find(m => m.id === id),
         create: (data) => {
           if (!validate.required(data.name, 'ชื่อยา')) return null;
           if (!validate.required(data.usageDetails, 'รายละเอียดการใช้')) return null;
@@ -606,13 +594,12 @@
         },
         delete: (id) => {
           window.markAsDeleted?.(KEYS.MEDICINES, id);
-          storage.set(KEYS.MEDICINES, storage.get(KEYS.MEDICINES).filter(m => m.id !== id));
           showToast('ลบยารักษาโรคสำเร็จ', 'success');
         }
       },
       feedingLogs: {
         getByCycle: (cycleId) => storage.get(KEYS.FEEDING_LOGS)
-          .filter(l => l.cycleId === cycleId)
+          .filter(l => l.cycleId === cycleId && !l.deleted)
           .sort((a, b) => new Date(b.date) - new Date(a.date) || b.time.localeCompare(a.time)),
         create: (data) => {
           // Allow medicine-only records without feed weight
@@ -648,20 +635,19 @@
         },
         delete: (id) => {
           window.markAsDeleted?.(KEYS.FEEDING_LOGS, id);
-          storage.set(KEYS.FEEDING_LOGS, storage.get(KEYS.FEEDING_LOGS).filter(l => l.id !== id));
           showToast('ลบมื้ออาหารสำเร็จ', 'success');
         },
         getLatest: (cycleId) => db.feedingLogs.getByCycle(cycleId)[0],
         getByDate: (cycleId, date) => {
           const dateStr = new Date(date).toDateString();
           return storage.get(KEYS.FEEDING_LOGS)
-            .filter(l => l.cycleId === cycleId && new Date(l.date).toDateString() === dateStr)
+            .filter(l => l.cycleId === cycleId && new Date(l.date).toDateString() === dateStr && !l.deleted)
             .sort((a, b) => a.time.localeCompare(b.time));
         }
       },
       waterQuality: {
         getByCycle: (cycleId) => storage.get(KEYS.WATER_QUALITY)
-          .filter(w => w.cycleId === cycleId)
+          .filter(w => w.cycleId === cycleId && !w.deleted)
           .sort((a, b) => new Date(b.date) - new Date(a.date)),
         create: (data) => {
           const records = storage.get(KEYS.WATER_QUALITY);
@@ -676,7 +662,7 @@
         getLatest: (cycleId) => db.waterQuality.getByCycle(cycleId)[0]
       },
       expenses: {
-        getByCycle: (cycleId) => storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycleId),
+        getByCycle: (cycleId) => storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycleId && !e.deleted),
         create: (data) => {
           if (!validate.positiveNumber(data.amount, 'จำนวนเงิน')) return null;
 
@@ -691,12 +677,11 @@
         },
         delete: (id) => {
           window.markAsDeleted?.(KEYS.EXPENSES, id);
-          storage.set(KEYS.EXPENSES, storage.get(KEYS.EXPENSES).filter(e => e.id !== id));
           showToast('ลบค่าใช้จ่ายสำเร็จ', 'success');
         }
       },
       harvests: {
-        getByCycle: (cycleId) => storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycleId),
+        getByCycle: (cycleId) => storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycleId && !h.deleted),
         create: (data) => {
           if (!validate.positiveNumber(data.weightKg, 'น้ำหนัก')) return null;
           if (!validate.positiveNumber(data.pricePerKg, 'ราคาขาย')) return null;
@@ -727,7 +712,7 @@
       },
       mortalities: {
         getByCycle: (cycleId) => storage.get(KEYS.MORTALITIES)
-          .filter(m => m.cycleId === cycleId)
+          .filter(m => m.cycleId === cycleId && !m.deleted)
           .sort((a, b) => new Date(b.date) - new Date(a.date)),
         create: (data) => {
           if (!validate.positiveNumber(data.count, 'จำนวนปลาตาย')) return null;
@@ -743,17 +728,16 @@
         },
         delete: (id) => {
           window.markAsDeleted?.(KEYS.MORTALITIES, id);
-          storage.set(KEYS.MORTALITIES, storage.get(KEYS.MORTALITIES).filter(m => m.id !== id));
           showToast('ลบบันทึกสำเร็จ', 'success');
         },
         getTotalByCycle: (cycleId) => {
-          const morts = storage.get(KEYS.MORTALITIES).filter(m => m.cycleId === cycleId);
+          const morts = storage.get(KEYS.MORTALITIES).filter(m => m.cycleId === cycleId && !m.deleted);
           return morts.reduce((sum, m) => sum + m.count, 0);
         },
         getToday: (cycleId) => {
           const today = new Date().toDateString();
           return storage.get(KEYS.MORTALITIES)
-            .filter(m => m.cycleId === cycleId && new Date(m.date).toDateString() === today);
+            .filter(m => m.cycleId === cycleId && new Date(m.date).toDateString() === today && !m.deleted);
         }
       },
       feedStock: {
@@ -1578,14 +1562,26 @@
               </div>
             </div>
 
-            <!-- Cost Breakdown -->
+            <!-- Cost Breakdown (Clickable) -->
             <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
-              <h3 class="font-semibold text-slate-200 mb-3">💰 รายละเอียดต้นทุน</h3>
+              <h3 class="font-semibold text-slate-200 mb-3">💰 รายละเอียดต้นทุน <span class="text-xs text-slate-500">(กดเพื่อดูรายละเอียด)</span></h3>
               <div class="space-y-2 text-sm">
-                <div class="flex justify-between"><span class="text-slate-400">ค่าลูกปลา</span><span>${formatCurrency(stats.fishCost)}</span></div>
-                <div class="flex justify-between"><span class="text-slate-400">ค่าอาหาร</span><span>${formatCurrency(stats.feedCost)}</span></div>
-                <div class="flex justify-between"><span class="text-slate-400">ค่าวิตามิน</span><span>${formatCurrency(stats.suppCost)}</span></div>
-                <div class="flex justify-between"><span class="text-slate-400">ค่าใช้จ่ายอื่น</span><span>${formatCurrency(stats.otherCost)}</span></div>
+                <button onclick="showCostDetail('fish', '${pond.id}')" class="w-full flex justify-between items-center p-2 -mx-2 rounded-lg hover:bg-slate-700/50 transition-colors">
+                  <span class="text-slate-400">🐟 ค่าลูกปลา</span>
+                  <span class="flex items-center gap-1">${formatCurrency(stats.fishCost)} <span class="text-slate-500">›</span></span>
+                </button>
+                <button onclick="showCostDetail('feed', '${pond.id}')" class="w-full flex justify-between items-center p-2 -mx-2 rounded-lg hover:bg-slate-700/50 transition-colors">
+                  <span class="text-slate-400">🍽️ ค่าอาหาร</span>
+                  <span class="flex items-center gap-1">${formatCurrency(stats.feedCost)} <span class="text-slate-500">›</span></span>
+                </button>
+                <button onclick="showCostDetail('supplement', '${pond.id}')" class="w-full flex justify-between items-center p-2 -mx-2 rounded-lg hover:bg-slate-700/50 transition-colors">
+                  <span class="text-slate-400">💊 ค่าวิตามิน</span>
+                  <span class="flex items-center gap-1">${formatCurrency(stats.suppCost)} <span class="text-slate-500">›</span></span>
+                </button>
+                <button onclick="showCostDetail('other', '${pond.id}')" class="w-full flex justify-between items-center p-2 -mx-2 rounded-lg hover:bg-slate-700/50 transition-colors">
+                  <span class="text-slate-400">📋 ค่าใช้จ่ายอื่น</span>
+                  <span class="flex items-center gap-1">${formatCurrency(stats.otherCost)} <span class="text-slate-500">›</span></span>
+                </button>
                 <div class="flex justify-between pt-2 border-t border-slate-700/50 font-medium">
                   <span class="text-slate-300">รวมทั้งหมด</span>
                   <span class="text-amber-400">${formatCurrency(stats.totalCost)}</span>
@@ -3829,6 +3825,154 @@
         amount: parseFloat(form.amount.value)
       });
       if (result) setState({ modal: null });
+    };
+
+    // แสดงรายละเอียดต้นทุนแต่ละประเภท
+    window.showCostDetail = (type, pondId) => {
+      const pond = db.ponds.getById(pondId);
+      const cycle = db.cycles.getActive(pondId);
+      if (!cycle) return;
+
+      const logs = db.feedingLogs.getByCycle(cycle.id);
+      const feeds = storage.get(KEYS.FEEDS) || [];
+      const supplements = storage.get(KEYS.SUPPLEMENTS) || [];
+      const expenses = db.expenses.getByCycle(cycle.id);
+      const fishType = db.fishTypes.getById(cycle.fishTypeId);
+
+      let title = '';
+      let content = '';
+      let total = 0;
+
+      switch(type) {
+        case 'fish':
+          title = '🐟 รายละเอียดค่าลูกปลา';
+          const fishCost = (cycle.fingerlingPrice || 0) * (cycle.fingerlingCount || 0);
+          total = fishCost;
+          content = `
+            <div class="space-y-3">
+              <div class="bg-slate-700/30 rounded-xl p-3">
+                <div class="text-slate-400 text-xs mb-1">พันธุ์ปลา</div>
+                <div class="text-slate-200">${fishType?.name || 'ไม่ระบุ'}</div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="bg-slate-700/30 rounded-xl p-3">
+                  <div class="text-slate-400 text-xs mb-1">จำนวนลูกปลา</div>
+                  <div class="text-cyan-400 font-medium">${formatNumber(cycle.fingerlingCount || 0)} ตัว</div>
+                </div>
+                <div class="bg-slate-700/30 rounded-xl p-3">
+                  <div class="text-slate-400 text-xs mb-1">ราคาต่อตัว</div>
+                  <div class="text-cyan-400 font-medium">${formatCurrency(cycle.fingerlingPrice || 0)}</div>
+                </div>
+              </div>
+              <div class="bg-cyan-500/10 rounded-xl p-3 border border-cyan-500/30">
+                <div class="text-slate-400 text-xs mb-1">รวมค่าลูกปลา</div>
+                <div class="text-cyan-400 font-bold text-lg">${formatCurrency(fishCost)}</div>
+              </div>
+            </div>
+          `;
+          break;
+
+        case 'feed':
+          title = '🍽️ รายละเอียดค่าอาหาร';
+          const feedItems = logs.filter(l => !l.medicineOnly).map(log => {
+            const feed = feeds.find(f => f.id === log.feedId);
+            const cost = log.weightKg * (feed?.pricePerKg || 0);
+            total += cost;
+            return { date: log.date, time: log.time, feed: feed?.name || 'อาหาร', weight: log.weightKg, price: feed?.pricePerKg || 0, cost };
+          }).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+          content = feedItems.length > 0 ? `
+            <div class="space-y-2 max-h-60 overflow-y-auto">
+              ${feedItems.slice(0, 20).map(item => `
+                <div class="bg-slate-700/30 rounded-xl p-3 flex justify-between items-center">
+                  <div>
+                    <div class="text-slate-300 text-sm">${item.feed}</div>
+                    <div class="text-slate-500 text-xs">${item.date} ${item.time} • ${item.weight} กก. × ${formatCurrency(item.price)}/กก.</div>
+                  </div>
+                  <div class="text-amber-400 font-medium">${formatCurrency(item.cost)}</div>
+                </div>
+              `).join('')}
+              ${feedItems.length > 20 ? `<div class="text-center text-slate-500 text-sm">และอีก ${feedItems.length - 20} รายการ...</div>` : ''}
+            </div>
+          ` : '<div class="text-slate-500 text-center py-4">ยังไม่มีบันทึกการให้อาหาร</div>';
+          break;
+
+        case 'supplement':
+          title = '💊 รายละเอียดค่าวิตามิน/อาหารเสริม';
+          const suppItems = [];
+          logs.forEach(log => {
+            if (log.supplements?.length > 0) {
+              log.supplements.forEach(s => {
+                const supp = supplements.find(sp => sp.id === s.supplementId);
+                const cost = (s.amount || 0) * (supp?.pricePerUnit || 0);
+                total += cost;
+                suppItems.push({ date: log.date, time: log.time, name: supp?.name || 'วิตามิน', amount: s.amount, unit: supp?.unit || '', price: supp?.pricePerUnit || 0, cost });
+              });
+            }
+          });
+          suppItems.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+          content = suppItems.length > 0 ? `
+            <div class="space-y-2 max-h-60 overflow-y-auto">
+              ${suppItems.slice(0, 20).map(item => `
+                <div class="bg-slate-700/30 rounded-xl p-3 flex justify-between items-center">
+                  <div>
+                    <div class="text-slate-300 text-sm">${item.name}</div>
+                    <div class="text-slate-500 text-xs">${item.date} ${item.time} • ${item.amount} ${item.unit}</div>
+                  </div>
+                  <div class="text-amber-400 font-medium">${formatCurrency(item.cost)}</div>
+                </div>
+              `).join('')}
+              ${suppItems.length > 20 ? `<div class="text-center text-slate-500 text-sm">และอีก ${suppItems.length - 20} รายการ...</div>` : ''}
+            </div>
+          ` : '<div class="text-slate-500 text-center py-4">ยังไม่มีบันทึกการใช้วิตามิน</div>';
+          break;
+
+        case 'other':
+          title = '📋 รายละเอียดค่าใช้จ่ายอื่นๆ';
+          const otherItems = expenses.map(e => {
+            total += e.amount;
+            return { date: e.date, category: e.category, description: e.description, amount: e.amount };
+          }).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+          content = otherItems.length > 0 ? `
+            <div class="space-y-2 max-h-60 overflow-y-auto">
+              ${otherItems.map(item => `
+                <div class="bg-slate-700/30 rounded-xl p-3 flex justify-between items-center">
+                  <div>
+                    <div class="text-slate-300 text-sm">${item.description || item.category}</div>
+                    <div class="text-slate-500 text-xs">${item.date} • ${item.category}</div>
+                  </div>
+                  <div class="text-amber-400 font-medium">${formatCurrency(item.amount)}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : '<div class="text-slate-500 text-center py-4">ยังไม่มีค่าใช้จ่ายอื่นๆ</div>';
+          break;
+      }
+
+      // แสดง modal
+      const modalHtml = `
+        <div id="costDetailModal" class="fixed inset-0 z-50 flex items-end justify-center" onclick="if(event.target === this) closeCostDetailModal()">
+          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+          <div class="relative w-full max-w-lg bg-slate-800 rounded-t-3xl p-6 max-h-[80vh] overflow-y-auto animate-slide-up">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-semibold text-slate-200">${title}</h3>
+              <button onclick="closeCostDetailModal()" class="p-2 text-slate-400 hover:text-slate-200">✕</button>
+            </div>
+            ${content}
+            <div class="mt-4 pt-4 border-t border-slate-700/50 flex justify-between items-center">
+              <span class="text-slate-300 font-medium">รวมทั้งหมด</span>
+              <span class="text-amber-400 font-bold text-xl">${formatCurrency(total)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+    };
+
+    window.closeCostDetailModal = () => {
+      document.getElementById('costDetailModal')?.remove();
     };
 
     window.calculateHarvestCount = () => {
