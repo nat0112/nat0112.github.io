@@ -771,7 +771,7 @@
         add: (feedId, quantity, note = '') => {
           if (!validate.positiveNumber(quantity, 'จำนวน')) return null;
           const stocks = storage.get(KEYS.FEED_STOCK);
-          const existingIndex = stocks.findIndex(s => s.feedId === feedId);
+          const existingIndex = stocks.findIndex(s => s.feedId === feedId && !s.deleted);
 
           if (existingIndex >= 0) {
             stocks[existingIndex].quantity += parseFloat(quantity);
@@ -808,7 +808,7 @@
         },
         deduct: (feedId, quantity) => {
           const stocks = storage.get(KEYS.FEED_STOCK);
-          const existingIndex = stocks.findIndex(s => s.feedId === feedId);
+          const existingIndex = stocks.findIndex(s => s.feedId === feedId && !s.deleted);
 
           if (existingIndex >= 0) {
             const newQty = stocks[existingIndex].quantity - parseFloat(quantity);
@@ -836,7 +836,7 @@
             return null;
           }
           const stocks = storage.get(KEYS.FEED_STOCK);
-          const existingIndex = stocks.findIndex(s => s.feedId === feedId);
+          const existingIndex = stocks.findIndex(s => s.feedId === feedId && !s.deleted);
 
           if (existingIndex >= 0) {
             const oldQty = stocks[existingIndex].quantity;
@@ -872,7 +872,7 @@
           return null;
         },
         delete: (feedId) => {
-          const stock = storage.get(KEYS.FEED_STOCK).find(s => s.feedId === feedId);
+          const stock = storage.get(KEYS.FEED_STOCK).filter(s => !s.deleted).find(s => s.feedId === feedId);
           if (stock && stock.id && window.markAsDeleted) {
             window.markAsDeleted(KEYS.FEED_STOCK, stock.id);
           }
@@ -933,7 +933,7 @@
         },
         update: (id, updates) => {
           const guides = storage.get(KEYS.GUIDES);
-          const index = guides.findIndex(g => g.id === id);
+          const index = guides.findIndex(g => g.id === id && !g.deleted);
           if (index !== -1) {
             guides[index] = { ...guides[index], ...updates, updatedAt: Date.now() };
             if (storage.set(KEYS.GUIDES, guides)) {
@@ -944,14 +944,10 @@
           return false;
         },
         delete: (id) => {
-          const guides = storage.get(KEYS.GUIDES);
-          const index = guides.findIndex(g => g.id === id);
-          if (index !== -1) {
-            guides[index] = { ...guides[index], deleted: true, deletedAt: Date.now(), updatedAt: Date.now() };
-            if (storage.set(KEYS.GUIDES, guides)) {
-              showToast('ลบคู่มือสำเร็จ', 'success');
-              return true;
-            }
+          if (window.markAsDeleted) {
+            window.markAsDeleted(KEYS.GUIDES, id);
+            showToast('ลบคู่มือสำเร็จ', 'success');
+            return true;
           }
           return false;
         }
