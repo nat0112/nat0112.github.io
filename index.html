@@ -346,6 +346,7 @@
     };
 
     // ===== Helper: Filter deleted records =====
+    // Helper function to filter out soft-deleted records
     const filterDeleted = (items) => (items || []).filter(item => !item?.deleted);
 
     // ===== Database with validation =====
@@ -2020,30 +2021,30 @@
               </button>
             ` : `
               <!-- Online Mode -->
-              <div class="flex items-center gap-3 p-4 ${isOnline ? 'bg-green-500/10 border-green-500/30' : 'bg-amber-500/10 border-amber-500/30'} border rounded-xl mb-4">
-                <div class="w-12 h-12 rounded-full ${isOnline ? 'bg-green-500/20' : 'bg-amber-500/20'} flex items-center justify-center text-2xl">
-                  ${isOnline ? '✅' : '⏳'}
+              <div class="flex items-center gap-3 p-4 ${isOnline() ? 'bg-green-500/10 border-green-500/30' : 'bg-amber-500/10 border-amber-500/30'} border rounded-xl mb-4">
+                <div class="w-12 h-12 rounded-full ${isOnline() ? 'bg-green-500/20' : 'bg-amber-500/20'} flex items-center justify-center text-2xl">
+                  ${isOnline() ? '✅' : '⏳'}
                 </div>
                 <div class="flex-1">
-                  <div class="font-medium ${isOnline ? 'text-green-400' : 'text-amber-400'}">
-                    ${isOnline ? 'เชื่อมต่อแล้ว' : 'กำลังเชื่อมต่อ...'}
+                  <div class="font-medium ${isOnline() ? 'text-green-400' : 'text-amber-400'}">
+                    ${isOnline() ? 'เชื่อมต่อแล้ว' : 'กำลังเชื่อมต่อ...'}
                   </div>
-                  <div class="text-xs ${isOnline ? 'text-green-500/70' : 'text-amber-500/70'}">
-                    ${isOnline ? 'ข้อมูลจะ sync อัตโนมัติ' : 'รอสัญญาณ...'}
+                  <div class="text-xs ${isOnline() ? 'text-green-500/70' : 'text-amber-500/70'}">
+                    ${isOnline() ? 'ข้อมูลจะ sync อัตโนมัติ' : 'รอสัญญาณ...'}
                   </div>
                 </div>
-                <div class="text-2xl ${isOnline ? '' : 'animate-pulse'}">
-                  ${isOnline ? '🟢' : '🟡'}
+                <div class="text-2xl ${isOnline() ? '' : 'animate-pulse'}">
+                  ${isOnline() ? '🟢' : '🟡'}
                 </div>
               </div>
 
               <!-- Sync Actions -->
               <div class="grid grid-cols-2 gap-2 mb-4">
-                <button onclick="manualSyncUpload()" class="p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline ? 'disabled' : ''}>
+                <button onclick="manualSyncUpload()" class="p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline() ? 'disabled' : ''}>
                   <span class="text-xl">📤</span>
                   <span>อัพโหลดขึ้น Cloud</span>
                 </button>
-                <button onclick="manualSyncDownload()" class="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline ? 'disabled' : ''}>
+                <button onclick="manualSyncDownload()" class="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline() ? 'disabled' : ''}>
                   <span class="text-xl">📥</span>
                   <span>ดาวน์โหลดจาก Cloud</span>
                 </button>
