@@ -767,6 +767,7 @@
           if (existingIndex >= 0) {
             stocks[existingIndex].quantity += parseFloat(quantity);
             stocks[existingIndex].lastUpdated = new Date().toISOString();
+            stocks[existingIndex].updatedAt = Date.now();
             stocks[existingIndex].history = stocks[existingIndex].history || [];
             stocks[existingIndex].history.push({
               type: 'add',
@@ -780,6 +781,7 @@
               feedId: feedId,
               quantity: parseFloat(quantity),
               lastUpdated: new Date().toISOString(),
+              updatedAt: Date.now(),
               history: [{
                 type: 'add',
                 quantity: parseFloat(quantity),
@@ -807,6 +809,7 @@
             }
             stocks[existingIndex].quantity = newQty;
             stocks[existingIndex].lastUpdated = new Date().toISOString();
+            stocks[existingIndex].updatedAt = Date.now();
             stocks[existingIndex].history = stocks[existingIndex].history || [];
             stocks[existingIndex].history.push({
               type: 'deduct',
@@ -830,6 +833,7 @@
             const oldQty = stocks[existingIndex].quantity;
             stocks[existingIndex].quantity = parseFloat(quantity);
             stocks[existingIndex].lastUpdated = new Date().toISOString();
+            stocks[existingIndex].updatedAt = Date.now();
             stocks[existingIndex].history = stocks[existingIndex].history || [];
             stocks[existingIndex].history.push({
               type: 'adjust',
@@ -843,6 +847,7 @@
               feedId: feedId,
               quantity: parseFloat(quantity),
               lastUpdated: new Date().toISOString(),
+              updatedAt: Date.now(),
               history: [{
                 type: 'set',
                 quantity: parseFloat(quantity),
