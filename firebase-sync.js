@@ -1133,12 +1133,14 @@ const adapters = {
           }
 
           const cloudData = snapshot.val();
+          console.log(`Firebase: received update for ${dbKey}`, cloudData !== null ? "with data" : "empty");
           if (cloudData !== null) {
             // ใช้ safeJSONParse แทน JSON.parse
             const localRaw = localStorage.getItem(key);
             const localData = safeJSONParse(localRaw, []);
 
             const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
+            console.log(`Firebase listener [${key}]: hasChanges=`, hasChanges, "local:", localData.length, "cloud:", toArray(cloudData).length);
 
             if (hasChanges) {
               localStorage.setItem(key, JSON.stringify(merged));
@@ -1340,6 +1342,7 @@ const adapters = {
               const localData = safeJSONParse(localRaw, []);
 
               const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
+            console.log(`Firebase listener [${key}]: hasChanges=`, hasChanges, "local:", localData.length, "cloud:", toArray(cloudData).length);
 
               if (hasChanges) {
                 localStorage.setItem(key, JSON.stringify(merged));
@@ -1546,6 +1549,7 @@ const adapters = {
               const localData = safeJSONParse(localRaw, []);
 
               const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
+            console.log(`Firebase listener [${key}]: hasChanges=`, hasChanges, "local:", localData.length, "cloud:", toArray(cloudData).length);
 
               if (hasChanges) {
                 localStorage.setItem(key, JSON.stringify(merged));
