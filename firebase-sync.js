@@ -299,6 +299,10 @@ const markAsDeleted = (key, id) => {
 
     // Sync deleted record to cloud immediately
     syncDeletedRecordToCloud(key, id, now);
+    
+    // Update UI after delete
+    smartRender();
+
   } catch (e) {
     console.error('Soft delete error:', e);
   }
@@ -406,7 +410,7 @@ const processDeletedSyncQueue = async () => {
  * @param {Array} items - array ของ records
  * @returns {Array} records ที่ไม่ได้ถูกลบ
  */
-const filterDeleted = (items) => {
+const _filterDeleted = (items) => {
   if (!Array.isArray(items)) return [];
   return items.filter(item => !item?.deleted);
 };
@@ -442,7 +446,7 @@ const cleanupDeletedRecords = () => {
 
 // Export สำหรับ index.html ใช้เมื่อลบข้อมูล
 window.markAsDeleted = markAsDeleted;
-window.filterDeleted = filterDeleted;
+// filterDeleted is defined in index.html
 
 /**
  * แปลง Firebase Object เป็น Array
@@ -1165,6 +1169,7 @@ const adapters = {
               }
 
 
+              smartRender();
             }
           }
         });
@@ -1360,6 +1365,7 @@ const adapters = {
                   }, SYNC_DEBOUNCE_MS);
                 }
 
+                smartRender();
 
               }
             }
@@ -1567,6 +1573,7 @@ const adapters = {
                 }
 
 
+                smartRender();
               }
             }
           }
@@ -1677,6 +1684,7 @@ const adapters = {
       this.client.collection(this.collection).subscribe('*', (e) => {
         if (e.record && SYNC_KEYS.includes(e.record.key)) {
           localStorage.setItem(e.record.key, JSON.stringify(e.record.data));
+          smartRender();
 
         }
       });
@@ -1824,6 +1832,7 @@ const adapters = {
       // MongoDB Data API doesn't support realtime - poll every 30s
       const interval = setInterval(async () => {
         await this.syncFromCloud();
+        smartRender();
 
       }, 30000);
 
@@ -1933,6 +1942,7 @@ const adapters = {
       // Poll every 60s
       const interval = setInterval(async () => {
         await this.syncFromCloud();
+        smartRender();
 
       }, 60000);
 
@@ -2051,6 +2061,7 @@ const adapters = {
       // Poll every 30s
       const interval = setInterval(async () => {
         await this.syncFromCloud();
+        smartRender();
 
       }, 30000);
 
@@ -2128,6 +2139,20 @@ const isLocalOnly = () => localStorage.getItem(LOCAL_ONLY_KEY) === 'true';
  * Alias สำหรับ isLocalOnly (backwards compatibility)
  */
 const isOfflineLocked = () => isLocalOnly();
+
+// Export status functions for index.html
+window.isOnline = () => isOnline;
+window.isLocalOnly = isLocalOnly;
+window.getFirebaseConfig = () => {
+  try {
+    const config = localStorage.getItem(SYNC_CONFIG_KEY);
+    if (config) {
+      const parsed = JSON.parse(config);
+      return parsed.config || null;
+    }
+  } catch (e) {}
+  return null;
+};
 
 // =============================================================================
 // PASSWORD SYSTEM
