@@ -872,8 +872,10 @@
           return null;
         },
         delete: (feedId) => {
-          const stocks = storage.get(KEYS.FEED_STOCK).filter(s => s.feedId !== feedId);
-          storage.set(KEYS.FEED_STOCK, stocks);
+          const stock = storage.get(KEYS.FEED_STOCK).find(s => s.feedId === feedId);
+          if (stock && stock.id && window.markAsDeleted) {
+            window.markAsDeleted(KEYS.FEED_STOCK, stock.id);
+          }
         }
       },
       stockPassword: {
@@ -3354,7 +3356,7 @@
             <form onsubmit="confirmDeleteStock(event, '${feedId}')">
               <div class="mb-4">
                 <label class="block text-sm text-slate-400 mb-1">กรอกรหัสผ่าน <span class="text-red-400">*</span></label>
-                <input type="password" name="password" placeholder="รหัสผ่าน" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+                <input type="password" name="password" placeholder="รหัสผ่าน" required autocomplete="current-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
               </div>
               <div class="grid grid-cols-2 gap-3">
                 <button type="button" onclick="setState({modal:null, pendingStockDelete:null})" class="py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-medium transition-colors">ยกเลิก</button>
@@ -3396,15 +3398,15 @@
               <form onsubmit="changeStockPassword(event)">
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">รหัสผ่านเดิม</label>
-                  <input type="password" name="oldPassword" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
+                  <input type="password" name="oldPassword" required autocomplete="current-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
                 </div>
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">รหัสผ่านใหม่</label>
-                  <input type="password" name="newPassword" required minlength="4" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
+                  <input type="password" name="newPassword" required minlength="4" autocomplete="new-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
                 </div>
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">ยืนยันรหัสผ่านใหม่</label>
-                  <input type="password" name="confirmPassword" required minlength="4" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
+                  <input type="password" name="confirmPassword" required minlength="4" autocomplete="new-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
                 </div>
                 <button type="submit" class="w-full py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-medium transition-colors text-sm">💾 เปลี่ยนรหัสผ่าน</button>
               </form>
@@ -3416,7 +3418,7 @@
               <form onsubmit="disableStockPassword(event)">
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">กรอกรหัสผ่านปัจจุบันเพื่อยืนยัน</label>
-                  <input type="password" name="password" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
+                  <input type="password" name="password" required autocomplete="current-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
                 </div>
                 <button type="submit" class="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-colors text-sm">🔓 ยกเลิกใช้รหัสผ่าน</button>
               </form>
@@ -3428,11 +3430,11 @@
               <form onsubmit="setStockPassword(event)">
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">รหัสผ่าน (อย่างน้อย 4 ตัว)</label>
-                  <input type="password" name="password" required minlength="4" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
+                  <input type="password" name="password" required minlength="4" autocomplete="new-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
                 </div>
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">ยืนยันรหัสผ่าน</label>
-                  <input type="password" name="confirmPassword" required minlength="4" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
+                  <input type="password" name="confirmPassword" required minlength="4" autocomplete="new-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
                 </div>
                 <button type="submit" class="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-colors text-sm">🔒 ตั้งรหัสผ่าน</button>
               </form>
