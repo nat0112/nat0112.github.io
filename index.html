@@ -193,7 +193,16 @@
       MORTALITIES: 'ff_mortalities',
       SETTINGS: 'ff_settings',
       FISH_TYPES: 'ff_fish_types',
-      STOCK_PASSWORD: 'ff_stock_password'
+      STOCK_PASSWORD: 'ff_stock_password',
+      GUIDES: 'ff_guides'
+    };
+
+    // Guide categories
+    const GUIDE_CATEGORIES = {
+      fish: { id: 'fish', name: 'คู่มือปลา', icon: '🐟', color: 'cyan' },
+      supplement: { id: 'supplement', name: 'วิตามิน/อาหารเสริม', icon: '💊', color: 'green' },
+      disease: { id: 'disease', name: 'โรคและการรักษา', icon: '🏥', color: 'red' },
+      other: { id: 'other', name: 'อื่นๆ', icon: '📚', color: 'purple' }
     };
 
     // Default fish types (will be loaded from storage)
@@ -900,6 +909,50 @@
           db.stockPassword.set(newPassword);
           return true;
         }
+      },
+      guides: {
+        getAll: () => storage.get(KEYS.GUIDES),
+        getByCategory: (category) => storage.get(KEYS.GUIDES).filter(g => g.category === category && !g.deleted),
+        getById: (id) => storage.get(KEYS.GUIDES).find(g => g.id === id),
+        add: (guide) => {
+          const guides = storage.get(KEYS.GUIDES);
+          const newGuide = {
+            ...guide,
+            id: generateId(),
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          };
+          guides.push(newGuide);
+          if (storage.set(KEYS.GUIDES, guides)) {
+            showToast('เพิ่มคู่มือสำเร็จ', 'success');
+            return newGuide;
+          }
+          return null;
+        },
+        update: (id, updates) => {
+          const guides = storage.get(KEYS.GUIDES);
+          const index = guides.findIndex(g => g.id === id);
+          if (index !== -1) {
+            guides[index] = { ...guides[index], ...updates, updatedAt: Date.now() };
+            if (storage.set(KEYS.GUIDES, guides)) {
+              showToast('แก้ไขคู่มือสำเร็จ', 'success');
+              return true;
+            }
+          }
+          return false;
+        },
+        delete: (id) => {
+          const guides = storage.get(KEYS.GUIDES);
+          const index = guides.findIndex(g => g.id === id);
+          if (index !== -1) {
+            guides[index] = { ...guides[index], deleted: true, deletedAt: Date.now(), updatedAt: Date.now() };
+            if (storage.set(KEYS.GUIDES, guides)) {
+              showToast('ลบคู่มือสำเร็จ', 'success');
+              return true;
+            }
+          }
+          return false;
+        }
       }
     };
 
@@ -1053,6 +1106,43 @@
         db.medicines.create({ name: 'เกลือ', description: 'รักษาโรคทั่วไป', medType: 'solid', price: 10, unit: 'กรัม', packageSize: 25000, usageDetails: 'ใช้ 0.5-1% ของปริมาณน้ำ แช่ 24-48 ชม.' });
         db.medicines.create({ name: 'ด่างทับทิม', description: 'ฆ่าเชื้อแบคทีเรีย', medType: 'solid', price: 250, unit: 'กรัม', packageSize: 100, usageDetails: 'ใช้ 2-4 กรัม/น้ำ 1,000 ลิตร แช่ 30 นาที' });
       }
+      // Load default guides from JSON if empty
+      if (db.guides.getAll().length === 0) {
+        loadDefaultGuides();
+      }
+    };
+
+    // Load guides from guides.json
+    const loadDefaultGuides = async () => {
+      try {
+        const response = await fetch('guides.json');
+        if (!response.ok) throw new Error('Failed to load guides.json');
+        const data = await response.json();
+
+        if (data.guides && Array.isArray(data.guides)) {
+          const existingGuides = db.guides.getAll();
+          const existingIds = new Set(existingGuides.map(g => g.id));
+
+          data.guides.forEach(guide => {
+            // Skip if already exists
+            if (existingIds.has(guide.id)) return;
+
+            // Add guide with predefined ID
+            const guides = storage.get(KEYS.GUIDES);
+            guides.push({
+              ...guide,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            });
+            storage.set(KEYS.GUIDES, guides);
+          });
+
+          console.log(`Loaded ${data.guides.length} default guides`);
+          if (typeof smartRender === 'function') smartRender();
+        }
+      } catch (err) {
+        console.warn('Could not load default guides:', err.message);
+      }
     };
 
     // ===== App State =====
@@ -1156,6 +1246,7 @@
     const renderMainContent = () => {
       if (state.tab === 'home') return renderHome();
       if (state.tab === 'inventory') return renderInventory();
+      if (state.tab === 'guides') return renderGuides();
       if (state.tab === 'reports') return renderReports();
       if (state.tab === 'settings') return renderSettings();
       return '';
@@ -1847,6 +1938,134 @@
       `;
     };
 
+    // ===== Guides Tab =====
+    const renderGuides = () => {
+      const allGuides = filterDeleted(db.guides.getAll());
+      const selectedCategory = state.guideCategory || 'all';
+      const selectedGuide = state.selectedGuide ? db.guides.getById(state.selectedGuide) : null;
+
+      // If viewing a specific guide
+      if (selectedGuide) {
+        return renderGuideDetail(selectedGuide);
+      }
+
+      const filteredGuides = selectedCategory === 'all'
+        ? allGuides
+        : allGuides.filter(g => g.category === selectedCategory);
+
+      const categoryColors = {
+        fish: 'cyan',
+        supplement: 'green',
+        disease: 'red',
+        other: 'purple'
+      };
+
+      return `
+        <div class="p-4 max-w-lg mx-auto fade-in pb-24">
+          <div class="flex items-center justify-between mb-4">
+            <h1 class="text-xl font-bold">📖 คู่มือการเลี้ยง</h1>
+            <button onclick="setState({modal:'addGuide'})" class="px-3 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 rounded-xl text-sm font-medium transition-colors flex items-center gap-1">
+              ➕ เพิ่มคู่มือ
+            </button>
+          </div>
+
+          <!-- Category Filter -->
+          <div class="flex gap-2 mb-4 overflow-x-auto pb-2">
+            <button onclick="setState({guideCategory:'all'})" class="px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors ${selectedCategory === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'}">
+              📚 ทั้งหมด (${allGuides.length})
+            </button>
+            ${Object.values(GUIDE_CATEGORIES).map(cat => {
+              const count = allGuides.filter(g => g.category === cat.id).length;
+              return `
+                <button onclick="setState({guideCategory:'${cat.id}'})" class="px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors ${selectedCategory === cat.id ? `bg-${cat.color}-500/30 text-${cat.color}-400` : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'}">
+                  ${cat.icon} ${cat.name} (${count})
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Guide List -->
+          ${filteredGuides.length === 0 ? `
+            <div class="text-center py-12 text-slate-500">
+              <div class="text-4xl mb-3">📖</div>
+              <p>ยังไม่มีคู่มือ</p>
+              <p class="text-sm mt-1">กดปุ่ม "เพิ่มคู่มือ" เพื่อเริ่มต้น</p>
+            </div>
+          ` : `
+            <div class="space-y-3">
+              ${filteredGuides.map(guide => {
+                const cat = GUIDE_CATEGORIES[guide.category] || GUIDE_CATEGORIES.other;
+                return `
+                  <div onclick="setState({selectedGuide:'${guide.id}'})" class="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 hover:bg-slate-700/50 cursor-pointer transition-all">
+                    <div class="flex items-start gap-3">
+                      <div class="text-2xl">${cat.icon}</div>
+                      <div class="flex-1 min-w-0">
+                        <h3 class="font-semibold text-slate-100 truncate">${guide.title}</h3>
+                        <p class="text-sm text-slate-400 mt-1 line-clamp-2">${guide.summary || ''}</p>
+                        <div class="flex items-center gap-2 mt-2">
+                          <span class="px-2 py-0.5 bg-${cat.color}-500/20 text-${cat.color}-400 rounded text-xs">${cat.name}</span>
+                          ${guide.fishType ? `<span class="text-xs text-slate-500">🐟 ${guide.fishType}</span>` : ''}
+                        </div>
+                      </div>
+                      <span class="text-slate-500">›</span>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+
+          <!-- Reload Default Guides -->
+          <div class="mt-6 pt-4 border-t border-slate-700/50">
+            <button onclick="reloadDefaultGuides()" class="w-full py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
+              🔄 โหลดคู่มือเริ่มต้นใหม่
+            </button>
+          </div>
+        </div>
+      `;
+    };
+
+    const renderGuideDetail = (guide) => {
+      const cat = GUIDE_CATEGORIES[guide.category] || GUIDE_CATEGORIES.other;
+
+      return `
+        <div class="p-4 max-w-lg mx-auto fade-in pb-24">
+          <button onclick="setState({selectedGuide:null})" class="flex items-center gap-2 text-slate-400 hover:text-slate-300 mb-4">
+            ← กลับไปรายการคู่มือ
+          </button>
+
+          <div class="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-2xl">${cat.icon}</span>
+              <span class="px-2 py-0.5 bg-${cat.color}-500/20 text-${cat.color}-400 rounded text-xs">${cat.name}</span>
+              ${guide.fishType ? `<span class="text-xs text-slate-500">🐟 ${guide.fishType}</span>` : ''}
+            </div>
+
+            <h1 class="text-xl font-bold text-slate-100 mb-2">${guide.title}</h1>
+            ${guide.summary ? `<p class="text-slate-400 mb-4">${guide.summary}</p>` : ''}
+
+            <div class="prose prose-invert prose-sm max-w-none">
+              <div class="text-slate-300 whitespace-pre-wrap leading-relaxed">${guide.content || ''}</div>
+            </div>
+
+            <div class="flex gap-2 mt-6 pt-4 border-t border-slate-700/50">
+              <button onclick="setState({modal:'editGuide', editingGuideId:'${guide.id}'})" class="flex-1 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 rounded-lg text-sm font-medium transition-colors">
+                ✏️ แก้ไข
+              </button>
+              <button onclick="confirmDeleteGuide('${guide.id}')" class="flex-1 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm font-medium transition-colors">
+                🗑️ ลบ
+              </button>
+            </div>
+
+            <div class="text-xs text-slate-500 mt-4 text-center">
+              สร้างเมื่อ: ${new Date(guide.createdAt).toLocaleDateString('th-TH')}
+              ${guide.updatedAt !== guide.createdAt ? ` • แก้ไขล่าสุด: ${new Date(guide.updatedAt).toLocaleDateString('th-TH')}` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
     const renderReports = () => {
       const ponds = db.ponds.getAll();
       const activePonds = ponds.filter(p => p.status === 'active');
@@ -2126,6 +2345,7 @@
       const tabs = [
         { id: 'home', icon: '🏠', label: 'บ่อเลี้ยง' },
         { id: 'inventory', icon: '📦', label: 'คลัง' },
+        { id: 'guides', icon: '📖', label: 'คู่มือ' },
         { id: 'reports', icon: '📊', label: 'รายงาน' },
         { id: 'settings', icon: '⚙️', label: 'ตั้งค่า' }
       ];
@@ -2170,7 +2390,9 @@
         editFeedStock: renderEditFeedStockModal,
         stockHistory: renderStockHistoryModal,
         stockPasswordConfirm: renderStockPasswordConfirmModal,
-        stockPasswordManage: renderStockPasswordManageModal
+        stockPasswordManage: renderStockPasswordManageModal,
+        addGuide: renderAddGuideModal,
+        editGuide: renderEditGuideModal
       };
 
       const modalFn = modals[state.modal];
@@ -3222,6 +3444,106 @@
       `;
     };
 
+    // ===== Guide Modals =====
+    const renderAddGuideModal = () => {
+      const fishTypes = filterDeleted(db.fishTypes.getAll());
+
+      return `
+        ${renderModalHeader('📖 เพิ่มคู่มือใหม่')}
+        <div class="p-4 overflow-y-auto">
+          <form onsubmit="addGuide(event)">
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">หมวดหมู่ <span class="text-red-400">*</span></label>
+              <select name="category" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+                ${Object.values(GUIDE_CATEGORIES).map(cat => `
+                  <option value="${cat.id}">${cat.icon} ${cat.name}</option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">ชื่อคู่มือ <span class="text-red-400">*</span></label>
+              <input type="text" name="title" placeholder="เช่น การให้อาหารปลาดุกวัยอ่อน" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">ชนิดปลา (ถ้ามี)</label>
+              <select name="fishType" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+                <option value="">-- ไม่ระบุ --</option>
+                ${fishTypes.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">สรุปย่อ</label>
+              <input type="text" name="summary" placeholder="อธิบายสั้นๆ" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">เนื้อหา <span class="text-red-400">*</span></label>
+              <textarea name="content" rows="10" required placeholder="รายละเอียดคู่มือ..." class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 resize-none"></textarea>
+            </div>
+
+            <div class="flex gap-3">
+              <button type="button" onclick="setState({modal:null})" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-medium transition-colors">ยกเลิก</button>
+              <button type="submit" class="flex-1 py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-medium transition-colors">💾 บันทึก</button>
+            </div>
+          </form>
+        </div>
+      `;
+    };
+
+    const renderEditGuideModal = () => {
+      const guide = db.guides.getById(state.editingGuideId);
+      if (!guide) return '';
+
+      const fishTypes = filterDeleted(db.fishTypes.getAll());
+
+      return `
+        ${renderModalHeader('✏️ แก้ไขคู่มือ')}
+        <div class="p-4 overflow-y-auto">
+          <form onsubmit="updateGuide(event, '${guide.id}')">
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">หมวดหมู่ <span class="text-red-400">*</span></label>
+              <select name="category" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+                ${Object.values(GUIDE_CATEGORIES).map(cat => `
+                  <option value="${cat.id}" ${guide.category === cat.id ? 'selected' : ''}>${cat.icon} ${cat.name}</option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">ชื่อคู่มือ <span class="text-red-400">*</span></label>
+              <input type="text" name="title" value="${guide.title || ''}" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">ชนิดปลา (ถ้ามี)</label>
+              <select name="fishType" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+                <option value="">-- ไม่ระบุ --</option>
+                ${fishTypes.map(f => `<option value="${f.name}" ${guide.fishType === f.name ? 'selected' : ''}>${f.name}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">สรุปย่อ</label>
+              <input type="text" name="summary" value="${guide.summary || ''}" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
+            </div>
+
+            <div class="mb-4">
+              <label class="block text-sm text-slate-400 mb-1">เนื้อหา <span class="text-red-400">*</span></label>
+              <textarea name="content" rows="10" required class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 resize-none">${guide.content || ''}</textarea>
+            </div>
+
+            <div class="flex gap-3">
+              <button type="button" onclick="setState({modal:null})" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-medium transition-colors">ยกเลิก</button>
+              <button type="submit" class="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-colors">💾 บันทึก</button>
+            </div>
+          </form>
+        </div>
+      `;
+    };
+
     // Fish Type Modals
     const renderAddFishTypeModal = () => `
       ${renderModalHeader('🐟 เพิ่มชนิดปลา')}
@@ -3568,6 +3890,91 @@
         // Update unit options for solid
         unitSelect.innerHTML = '<option value="กรัม">กรัม</option><option value="กก.">กก.</option>';
       }
+    };
+
+    // ===== Guide Functions =====
+    window.addGuide = (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const guide = {
+        category: form.category.value,
+        title: form.title.value.trim(),
+        fishType: form.fishType.value || null,
+        summary: form.summary.value.trim() || null,
+        content: form.content.value.trim()
+      };
+      if (db.guides.add(guide)) {
+        setState({ modal: null });
+      }
+    };
+
+    window.updateGuide = (e, id) => {
+      e.preventDefault();
+      const form = e.target;
+      const updates = {
+        category: form.category.value,
+        title: form.title.value.trim(),
+        fishType: form.fishType.value || null,
+        summary: form.summary.value.trim() || null,
+        content: form.content.value.trim()
+      };
+      if (db.guides.update(id, updates)) {
+        setState({ modal: null, selectedGuide: id });
+      }
+    };
+
+    window.confirmDeleteGuide = (id) => {
+      const guide = db.guides.getById(id);
+      if (!guide) return;
+
+      showConfirm(
+        `ต้องการลบคู่มือ "${guide.title}" หรือไม่?`,
+        () => {
+          db.guides.delete(id);
+          setState({ selectedGuide: null });
+        }
+      );
+    };
+
+    window.reloadDefaultGuides = async () => {
+      showConfirm(
+        'โหลดคู่มือเริ่มต้นจาก guides.json? (คู่มือที่มีอยู่แล้วจะไม่ถูกเขียนทับ)',
+        async () => {
+          try {
+            const response = await fetch('guides.json?t=' + Date.now()); // Bypass cache
+            if (!response.ok) throw new Error('Failed to load guides.json');
+            const data = await response.json();
+
+            if (data.guides && Array.isArray(data.guides)) {
+              const existingGuides = db.guides.getAll();
+              const existingIds = new Set(existingGuides.map(g => g.id));
+              let addedCount = 0;
+
+              data.guides.forEach(guide => {
+                if (existingIds.has(guide.id)) return;
+
+                const guides = storage.get(KEYS.GUIDES);
+                guides.push({
+                  ...guide,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now()
+                });
+                storage.set(KEYS.GUIDES, guides);
+                addedCount++;
+              });
+
+              if (addedCount > 0) {
+                showToast(`เพิ่มคู่มือใหม่ ${addedCount} รายการ`, 'success');
+                render();
+              } else {
+                showToast('ไม่มีคู่มือใหม่ที่ต้องเพิ่ม', 'info');
+              }
+            }
+          } catch (err) {
+            showToast('ไม่สามารถโหลดคู่มือได้: ' + err.message, 'error');
+          }
+        }
+      );
     };
 
     window.addFishType = (e) => {
