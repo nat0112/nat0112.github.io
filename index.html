@@ -751,14 +751,14 @@
         }
       },
       feedStock: {
-        getAll: () => storage.get(KEYS.FEED_STOCK),
-        getByFeedId: (feedId) => storage.get(KEYS.FEED_STOCK).find(s => s.feedId === feedId),
+        getAll: () => storage.get(KEYS.FEED_STOCK).filter(s => !s.deleted),
+        getByFeedId: (feedId) => storage.get(KEYS.FEED_STOCK).filter(s => !s.deleted).find(s => s.feedId === feedId),
         getStock: (feedId) => {
-          const stock = storage.get(KEYS.FEED_STOCK).find(s => s.feedId === feedId);
+          const stock = storage.get(KEYS.FEED_STOCK).filter(s => !s.deleted).find(s => s.feedId === feedId);
           return stock ? stock.quantity : 0;
         },
         getFeedsWithStock: () => {
-          const stocks = storage.get(KEYS.FEED_STOCK);
+          const stocks = storage.get(KEYS.FEED_STOCK).filter(s => !s.deleted);
           const feeds = db.feeds.getAll();
           return feeds.filter(f => {
             const stock = stocks.find(s => s.feedId === f.id);
@@ -913,9 +913,9 @@
         }
       },
       guides: {
-        getAll: () => storage.get(KEYS.GUIDES),
+        getAll: () => storage.get(KEYS.GUIDES).filter(g => !g.deleted),
         getByCategory: (category) => storage.get(KEYS.GUIDES).filter(g => g.category === category && !g.deleted),
-        getById: (id) => storage.get(KEYS.GUIDES).find(g => g.id === id),
+        getById: (id) => storage.get(KEYS.GUIDES).filter(g => !g.deleted).find(g => g.id === id),
         add: (guide) => {
           const guides = storage.get(KEYS.GUIDES);
           const newGuide = {
