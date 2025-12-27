@@ -2548,7 +2548,7 @@ const showUnlockModal = () => {
         <div>
           <input type="password" id="unlock-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
-            placeholder="รหัสผ่าน"
+            placeholder="รหัสผ่าน" autocomplete="current-password"
             onkeypress="if(event.key==='Enter')unlockOffline()">
         </div>
 
@@ -2589,7 +2589,7 @@ window.showForgotPasswordModal = () => {
         <div>
           <input type="password" id="master-key-input"
             class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100 text-center text-lg tracking-widest"
-            placeholder="มาสเตอร์คีย์"
+            placeholder="มาสเตอร์คีย์" autocomplete="off"
             onkeypress="if(event.key==='Enter')verifyMasterKey()">
         </div>
 
@@ -2648,21 +2648,21 @@ window.showChangePasswordModal = () => {
           <label class="block text-sm text-slate-300 mb-2">รหัสผ่านเดิม</label>
           <input type="password" id="old-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100"
-            placeholder="รหัสผ่านเดิม">
+            placeholder="รหัสผ่านเดิม" autocomplete="current-password">
         </div>
 
         <div>
           <label class="block text-sm text-slate-300 mb-2">รหัสผ่านใหม่</label>
           <input type="password" id="new-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100"
-            placeholder="รหัสผ่านใหม่ (4+ ตัวอักษร)">
+            placeholder="รหัสผ่านใหม่ (4+ ตัวอักษร)" autocomplete="new-password">
         </div>
 
         <div>
           <label class="block text-sm text-slate-300 mb-2">ยืนยันรหัสผ่านใหม่</label>
           <input type="password" id="confirm-new-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100"
-            placeholder="ยืนยันรหัสผ่านใหม่"
+            placeholder="ยืนยันรหัสผ่านใหม่" autocomplete="new-password"
             onkeypress="if(event.key==='Enter')submitChangePassword()">
         </div>
 
