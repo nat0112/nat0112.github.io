@@ -3354,6 +3354,7 @@
 
           ${db.stockPassword.isEnabled() ? `
             <form onsubmit="confirmDeleteStock(event, '${feedId}')">
+              <input type="text" name="username" value="stock-user" autocomplete="username" class="hidden" aria-hidden="true">
               <div class="mb-4">
                 <label class="block text-sm text-slate-400 mb-1">กรอกรหัสผ่าน <span class="text-red-400">*</span></label>
                 <input type="password" name="password" placeholder="รหัสผ่าน" required autocomplete="current-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-slate-100">
@@ -3396,6 +3397,7 @@
             <div class="mb-4">
               <h4 class="text-sm font-medium text-slate-300 mb-3">เปลี่ยนรหัสผ่าน</h4>
               <form onsubmit="changeStockPassword(event)">
+                <input type="text" name="username" value="stock-user" autocomplete="username" class="hidden" aria-hidden="true">
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">รหัสผ่านเดิม</label>
                   <input type="password" name="oldPassword" required autocomplete="current-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
@@ -3416,6 +3418,7 @@
             <div class="border-t border-slate-700/50 pt-4">
               <h4 class="text-sm font-medium text-slate-300 mb-3">ยกเลิกใช้งานรหัสผ่าน</h4>
               <form onsubmit="disableStockPassword(event)">
+                <input type="text" name="username" value="stock-user" autocomplete="username" class="hidden" aria-hidden="true">
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">กรอกรหัสผ่านปัจจุบันเพื่อยืนยัน</label>
                   <input type="password" name="password" required autocomplete="current-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
@@ -3428,6 +3431,7 @@
             <div class="mb-4">
               <h4 class="text-sm font-medium text-slate-300 mb-3">ตั้งรหัสผ่านใหม่</h4>
               <form onsubmit="setStockPassword(event)">
+                <input type="text" name="username" value="stock-user" autocomplete="username" class="hidden" aria-hidden="true">
                 <div class="mb-3">
                   <label class="block text-xs text-slate-400 mb-1">รหัสผ่าน (อย่างน้อย 4 ตัว)</label>
                   <input type="password" name="password" required minlength="4" autocomplete="new-password" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2 text-slate-100">
