@@ -256,6 +256,18 @@ const cleanupDeletedIds = () => {
 window.markAsDeleted = markAsDeleted;
 
 /**
+ * แปลง Firebase Object เป็น Array
+ * Firebase เก็บ Array เป็น Object ที่มี index เป็น key
+ * เช่น { "0": {...}, "1": {...} } → [{...}, {...}]
+ */
+const toArray = (data) => {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+  // Firebase Object → Array (เอาเฉพาะ values ที่เป็น object)
+  return Object.values(data).filter(item => item && typeof item === 'object');
+};
+
+/**
  * เปรียบเทียบและ merge 2 arrays โดยใช้ timestamp
  * @param {string} key - localStorage key (เช่น ff_ponds) สำหรับเช็ค deleted IDs
  * @param {Array} localData - ข้อมูลจาก localStorage
@@ -273,8 +285,9 @@ window.markAsDeleted = markAsDeleted;
  * 4. Return ข้อมูลทั้งหมดจาก Map
  */
 const mergeArraysByTimestamp = (key, localData, cloudData) => {
-  if (!Array.isArray(localData)) localData = [];
-  if (!Array.isArray(cloudData)) cloudData = [];
+  // ใช้ toArray เพื่อแปลง Firebase Object เป็น Array
+  localData = toArray(localData);
+  cloudData = toArray(cloudData);
 
   const merged = new Map();
   const localIds = new Set(localData.map(item => item?.id).filter(Boolean));
@@ -345,15 +358,19 @@ const mergeArraysByTimestamp = (key, localData, cloudData) => {
  * รองรับ soft delete (ไม่เอาข้อมูลที่ลบแล้วกลับมา)
  */
 const smartMergeData = (key, localData, cloudData) => {
+  // แปลง Object เป็น Array ก่อน (Firebase ส่ง Object มา)
+  const localArr = toArray(localData);
+  const cloudArr = toArray(cloudData);
+
   // ถ้าไม่มีข้อมูล cloud ใช้ local
-  if (!cloudData || (Array.isArray(cloudData) && cloudData.length === 0)) {
-    return { merged: localData, hasChanges: localData && localData.length > 0 };
+  if (cloudArr.length === 0) {
+    return { merged: localArr, hasChanges: localArr.length > 0 };
   }
 
   // ถ้าไม่มีข้อมูล local แต่มี cloud - ต้องเช็ค deleted IDs ก่อน
-  if (!localData || (Array.isArray(localData) && localData.length === 0)) {
+  if (localArr.length === 0) {
     // กรอง cloud data โดยเอาเฉพาะที่ไม่ได้ถูกลบ
-    const filteredCloud = cloudData.filter(item => {
+    const filteredCloud = cloudArr.filter(item => {
       if (!item || !item.id) return false;
       const cloudTs = getRecordTimestamp(item);
       return !isDeletedAfter(key, item.id, cloudTs);
