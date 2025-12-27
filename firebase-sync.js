@@ -172,36 +172,124 @@ const addSyncSequence = (record) => {
   return { ...record, _syncSeq: syncSequence };
 };
 
+// =============================================================================
+// SOFT DELETE SYSTEM (ป้องกันข้อมูลที่ลบแล้วกลับมา)
+// =============================================================================
+/**
+ * @description ระบบ Soft Delete สำหรับ sync
+ *              เมื่อลบข้อมูล จะบันทึก ID และ timestamp ไว้
+ *              ป้องกันไม่ให้ข้อมูลเก่าจาก cloud กลับมา
+ *
+ * Structure:
+ * {
+ *   "ff_ponds": { "id1": 1703123456789, "id2": 1703123456790 },
+ *   "ff_cycles": { "id3": 1703123456791 }
+ * }
+ */
+const DELETED_IDS_KEY = 'ff_deleted_ids';
+
+/**
+ * ดึงรายการ ID ที่ถูกลบ
+ */
+const getDeletedIds = () => {
+  try {
+    const data = localStorage.getItem(DELETED_IDS_KEY);
+    return data ? JSON.parse(data) : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+/**
+ * บันทึก ID ที่ถูกลบ
+ * @param {string} key - localStorage key (เช่น ff_ponds)
+ * @param {string} id - record ID ที่ถูกลบ
+ */
+const markAsDeleted = (key, id) => {
+  const deleted = getDeletedIds();
+  if (!deleted[key]) deleted[key] = {};
+  deleted[key][id] = Date.now();
+  localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(deleted));
+  console.log(`Sync: marked ${key}/${id} as deleted`);
+};
+
+/**
+ * เช็คว่า record ถูกลบหลังจาก timestamp ที่ระบุหรือไม่
+ * @param {string} key - localStorage key
+ * @param {string} id - record ID
+ * @param {number} recordTimestamp - timestamp ของ record
+ * @returns {boolean} true = ถูกลบแล้ว (อย่าเอากลับมา)
+ */
+const isDeletedAfter = (key, id, recordTimestamp) => {
+  const deleted = getDeletedIds();
+  if (!deleted[key] || !deleted[key][id]) return false;
+  return deleted[key][id] > recordTimestamp;
+};
+
+/**
+ * ล้าง deleted ID ที่เก่าเกิน 7 วัน (cleanup)
+ */
+const cleanupDeletedIds = () => {
+  const deleted = getDeletedIds();
+  const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  let changed = false;
+
+  Object.keys(deleted).forEach(key => {
+    Object.keys(deleted[key]).forEach(id => {
+      if (deleted[key][id] < sevenDaysAgo) {
+        delete deleted[key][id];
+        changed = true;
+      }
+    });
+    // ลบ key ที่ว่างเปล่า
+    if (Object.keys(deleted[key]).length === 0) {
+      delete deleted[key];
+    }
+  });
+
+  if (changed) {
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(deleted));
+  }
+};
+
+// Export สำหรับ index.html ใช้เมื่อลบข้อมูล
+window.markAsDeleted = markAsDeleted;
+
 /**
  * เปรียบเทียบและ merge 2 arrays โดยใช้ timestamp
+ * @param {string} key - localStorage key (เช่น ff_ponds) สำหรับเช็ค deleted IDs
  * @param {Array} localData - ข้อมูลจาก localStorage
  * @param {Array} cloudData - ข้อมูลจาก cloud
  * @returns {Array} ข้อมูลที่ merge แล้ว
  *
  * @algorithm
- * 1. ใส่ข้อมูล cloud ทั้งหมดลง Map (key = id)
+ * 1. ใส่ข้อมูล cloud ทั้งหมดลง Map (ยกเว้นที่ถูกลบแล้ว)
  * 2. วนลูป local data:
  *    - ถ้าไม่มีใน cloud → เพิ่มเข้าไป (ข้อมูลใหม่จาก local)
  *    - ถ้ามีใน cloud → เปรียบเทียบ timestamp:
  *      - local ใหม่กว่า → ใช้ local
  *      - cloud ใหม่กว่าหรือเท่ากัน → ใช้ cloud
- * 3. Return ข้อมูลทั้งหมดจาก Map
- *
- * @example
- * const local = [{ id: '1', name: 'A', updatedAt: '2025-01-15T10:00:00Z' }];
- * const cloud = [{ id: '1', name: 'B', updatedAt: '2025-01-15T09:00:00Z' }];
- * const merged = mergeArraysByTimestamp(local, cloud);
- * // ผลลัพธ์: [{ id: '1', name: 'A', ... }] เพราะ local ใหม่กว่า
+ * 3. กรองข้อมูลที่ถูกลบออก
+ * 4. Return ข้อมูลทั้งหมดจาก Map
  */
-const mergeArraysByTimestamp = (localData, cloudData) => {
+const mergeArraysByTimestamp = (key, localData, cloudData) => {
   if (!Array.isArray(localData)) localData = [];
   if (!Array.isArray(cloudData)) cloudData = [];
 
   const merged = new Map();
+  const localIds = new Set(localData.map(item => item?.id).filter(Boolean));
 
-  // เพิ่มข้อมูล cloud ก่อน
+  // เพิ่มข้อมูล cloud ก่อน (ยกเว้นที่ถูกลบแล้ว)
   cloudData.forEach(item => {
     if (item && item.id) {
+      const cloudTs = getRecordTimestamp(item);
+
+      // เช็คว่าถูกลบหลังจาก cloud timestamp หรือไม่
+      if (isDeletedAfter(key, item.id, cloudTs)) {
+        console.log(`Sync: skipping deleted record ${key}/${item.id}`);
+        return; // ข้ามไป ไม่เอากลับมา
+      }
+
       merged.set(item.id, { ...item, _source: 'cloud' });
     }
   });
@@ -224,13 +312,23 @@ const mergeArraysByTimestamp = (localData, cloudData) => {
           merged.set(item.id, { ...item, _source: 'local', _deviceId: myDeviceId });
         } else if (localTs === cloudTs) {
           // timestamp เท่ากัน - ใช้ device ID เป็น tiebreaker
-          // ถ้าเป็นข้อมูลจากเครื่องนี้ ให้ใช้ local (ข้อมูลล่าสุดที่ user แก้ไข)
           if (item._deviceId === myDeviceId || existing._deviceId !== myDeviceId) {
             merged.set(item.id, { ...item, _source: 'local', _deviceId: myDeviceId });
           }
-          // ถ้าเป็นจากเครื่องอื่น ใช้ cloud (เพราะ cloud ถือเป็น source of truth)
         }
-        // ถ้า cloud ใหม่กว่า ใช้ cloud (ที่เพิ่มไว้แล้ว)
+      }
+    }
+  });
+
+  // ลบ records ที่ไม่มีใน local และถูก mark ว่าลบแล้ว
+  // (กรณีที่ cloud มีแต่ local ไม่มี = อาจเป็นข้อมูลที่ถูกลบ)
+  merged.forEach((item, id) => {
+    if (item._source === 'cloud' && !localIds.has(id)) {
+      // Cloud-only record - เช็คว่าถูกลบหรือไม่
+      const cloudTs = getRecordTimestamp(item);
+      if (isDeletedAfter(key, id, cloudTs)) {
+        merged.delete(id);
+        console.log(`Sync: removed cloud-only deleted record ${key}/${id}`);
       }
     }
   });
@@ -244,18 +342,27 @@ const mergeArraysByTimestamp = (localData, cloudData) => {
 
 /**
  * Smart sync - เปรียบเทียบและ merge ข้อมูลก่อน sync
+ * รองรับ soft delete (ไม่เอาข้อมูลที่ลบแล้วกลับมา)
  */
 const smartMergeData = (key, localData, cloudData) => {
-  // ถ้าไม่มีข้อมูลฝั่งใดฝั่งหนึ่ง ใช้อีกฝั่ง
+  // ถ้าไม่มีข้อมูล cloud ใช้ local
   if (!cloudData || (Array.isArray(cloudData) && cloudData.length === 0)) {
     return { merged: localData, hasChanges: localData && localData.length > 0 };
   }
+
+  // ถ้าไม่มีข้อมูล local แต่มี cloud - ต้องเช็ค deleted IDs ก่อน
   if (!localData || (Array.isArray(localData) && localData.length === 0)) {
-    return { merged: cloudData, hasChanges: true };
+    // กรอง cloud data โดยเอาเฉพาะที่ไม่ได้ถูกลบ
+    const filteredCloud = cloudData.filter(item => {
+      if (!item || !item.id) return false;
+      const cloudTs = getRecordTimestamp(item);
+      return !isDeletedAfter(key, item.id, cloudTs);
+    });
+    return { merged: filteredCloud, hasChanges: filteredCloud.length > 0 };
   }
 
-  // Merge arrays by timestamp
-  const merged = mergeArraysByTimestamp(localData, cloudData);
+  // Merge arrays by timestamp (พร้อมเช็ค deleted IDs)
+  const merged = mergeArraysByTimestamp(key, localData, cloudData);
 
   // เช็คว่ามีการเปลี่ยนแปลงหรือไม่
   const hasChanges = JSON.stringify(merged) !== JSON.stringify(localData) ||
@@ -2380,6 +2487,9 @@ const startPeriodicSync = () => {
  * 7. Sync ข้อมูลเริ่มต้น
  */
 const initCloudSync = async () => {
+  // Cleanup deleted IDs ที่เก่าเกิน 7 วัน
+  cleanupDeletedIds();
+
   // สร้าง sync indicator ที่มุมบนขวา
   createSyncStatusUI();
 
