@@ -111,6 +111,81 @@ const SYNC_KEYS = [
 ];
 
 // =============================================================================
+// SMART RENDER SYSTEM (Skip if no changes + Debounce + Batch)
+// =============================================================================
+// ป้องกันการ render ซ้ำซ้อนและ render เฉพาะเมื่อข้อมูลเปลี่ยนจริง
+// =============================================================================
+
+let lastDataFingerprint = null;
+let pendingRender = false;
+let renderDebounceTimer = null;
+const RENDER_DEBOUNCE_MS = 300;
+
+/**
+ * สร้าง fingerprint ของข้อมูลทั้งหมดเพื่อเปรียบเทียบ
+ * ใช้ simple hash แทน JSON.stringify เพื่อประสิทธิภาพ
+ */
+const getDataFingerprint = () => {
+  let hash = 0;
+  for (const key of SYNC_KEYS) {
+    const data = localStorage.getItem(key);
+    if (data) {
+      // Simple hash function (djb2)
+      for (let i = 0; i < data.length; i++) {
+        hash = ((hash << 5) - hash) + data.charCodeAt(i);
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+    }
+  }
+  return hash;
+};
+
+/**
+ * Smart Render - Skip if data unchanged + Debounce + Batch
+ * - เปรียบเทียบ fingerprint ก่อน render
+ * - รวม render requests หลายๆ อันเข้าด้วยกัน (batch)
+ * - รอ debounce ก่อน render จริง
+ */
+const smartRender = (force = false) => {
+  // Mark that render is pending
+  pendingRender = true;
+
+  // Clear existing timer (batch multiple calls)
+  if (renderDebounceTimer) {
+    clearTimeout(renderDebounceTimer);
+  }
+
+  // Debounce - wait before actual render
+  renderDebounceTimer = setTimeout(() => {
+    pendingRender = false;
+
+    // Skip if data hasn't changed (unless forced)
+    const currentFingerprint = getDataFingerprint();
+    if (!force && currentFingerprint === lastDataFingerprint) {
+      console.log('Render: skipped (no data changes)');
+      return;
+    }
+
+    // Update fingerprint and render
+    lastDataFingerprint = currentFingerprint;
+    if (window.render) {
+      console.log('Render: executing');
+      window.render();
+    }
+  }, RENDER_DEBOUNCE_MS);
+};
+
+/**
+ * Force render (bypass fingerprint check)
+ * ใช้เมื่อต้องการ render แน่ๆ เช่น เปลี่ยนหน้า
+ */
+const forceRender = () => smartRender(true);
+
+// Export for use in adapters and index.html
+window.smartRender = smartRender;
+window.forceRender = forceRender;
+
+// =============================================================================
 // SMART MERGE UTILITIES
 // =============================================================================
 // ฟังก์ชันสำหรับ merge ข้อมูลระหว่าง local และ cloud อย่างชาญฉลาด
@@ -173,87 +248,201 @@ const addSyncSequence = (record) => {
 };
 
 // =============================================================================
-// SOFT DELETE SYSTEM (ป้องกันข้อมูลที่ลบแล้วกลับมา)
+// SOFT DELETE SYSTEM (Best Practice - Flag in Record)
 // =============================================================================
 /**
- * @description ระบบ Soft Delete สำหรับ sync
- *              เมื่อลบข้อมูล จะบันทึก ID และ timestamp ไว้
- *              ป้องกันไม่ให้ข้อมูลเก่าจาก cloud กลับมา
+ * @description ระบบ Soft Delete แบบ Best Practice
+ *              แทนที่จะลบจริง → set deleted: true, deletedAt: timestamp ใน record
+ *              ทุกเครื่องเห็น record เดียวกัน (sync ผ่าน cloud)
+ *              กรอง deleted=true ออกตอนแสดงผล
  *
- * Structure:
+ * Record Structure:
  * {
- *   "ff_ponds": { "id1": 1703123456789, "id2": 1703123456790 },
- *   "ff_cycles": { "id3": 1703123456791 }
+ *   id: "abc123",
+ *   name: "ข้อมูล",
+ *   deleted: true,        // flag บอกว่าถูกลบ
+ *   deletedAt: 1703123456789,  // timestamp ที่ลบ
+ *   updatedAt: 1703123456789   // timestamp ล่าสุด
  * }
  */
-const DELETED_IDS_KEY = 'ff_deleted_ids';
 
 /**
- * ดึงรายการ ID ที่ถูกลบ
- */
-const getDeletedIds = () => {
-  try {
-    const data = localStorage.getItem(DELETED_IDS_KEY);
-    return data ? JSON.parse(data) : {};
-  } catch (e) {
-    return {};
-  }
-};
-
-/**
- * บันทึก ID ที่ถูกลบ
+ * Mark record as deleted (Soft Delete) + Sync to Cloud
  * @param {string} key - localStorage key (เช่น ff_ponds)
- * @param {string} id - record ID ที่ถูกลบ
+ * @param {string} id - record ID ที่ต้องการลบ
+ *
+ * ขั้นตอน:
+ * 1. Set deleted=true, deletedAt=timestamp ใน localStorage
+ * 2. Sync deleted record ไป Cloud (ทุกเครื่องจะเห็น deleted flag)
+ * 3. Cloud จะเก็บ deleted record ไว้ 30 วัน แล้วลบจริง (hard delete)
  */
 const markAsDeleted = (key, id) => {
-  const deleted = getDeletedIds();
-  if (!deleted[key]) deleted[key] = {};
-  deleted[key][id] = Date.now();
-  localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(deleted));
-  console.log(`Sync: marked ${key}/${id} as deleted`);
-};
+  try {
+    const data = localStorage.getItem(key);
+    const items = data ? JSON.parse(data) : [];
+    const now = Date.now();
 
-/**
- * เช็คว่า record ถูกลบหลังจาก timestamp ที่ระบุหรือไม่
- * @param {string} key - localStorage key
- * @param {string} id - record ID
- * @param {number} recordTimestamp - timestamp ของ record
- * @returns {boolean} true = ถูกลบแล้ว (อย่าเอากลับมา)
- */
-const isDeletedAfter = (key, id, recordTimestamp) => {
-  const deleted = getDeletedIds();
-  if (!deleted[key] || !deleted[key][id]) return false;
-  return deleted[key][id] > recordTimestamp;
-};
-
-/**
- * ล้าง deleted ID ที่เก่าเกิน 7 วัน (cleanup)
- */
-const cleanupDeletedIds = () => {
-  const deleted = getDeletedIds();
-  const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-  let changed = false;
-
-  Object.keys(deleted).forEach(key => {
-    Object.keys(deleted[key]).forEach(id => {
-      if (deleted[key][id] < sevenDaysAgo) {
-        delete deleted[key][id];
-        changed = true;
+    const updated = items.map(item => {
+      if (item && item.id === id) {
+        return {
+          ...item,
+          deleted: true,
+          deletedAt: now,
+          updatedAt: now
+        };
       }
+      return item;
     });
-    // ลบ key ที่ว่างเปล่า
-    if (Object.keys(deleted[key]).length === 0) {
-      delete deleted[key];
+
+    localStorage.setItem(key, JSON.stringify(updated));
+    console.log(`Sync: soft deleted ${key}/${id}`);
+
+    // Sync deleted record to cloud immediately
+    syncDeletedRecordToCloud(key, id, now);
+  } catch (e) {
+    console.error('Soft delete error:', e);
+  }
+};
+
+// Queue for deleted records to sync (deferred execution)
+const deletedSyncQueue = [];
+
+/**
+ * Queue deleted record for cloud sync
+ * จะถูก process หลังจาก adapters ถูก init
+ */
+const syncDeletedRecordToCloud = (key, id, deletedAt) => {
+  deletedSyncQueue.push({ key, id, deletedAt });
+  // Process queue after short delay (ensures adapters are initialized)
+  setTimeout(() => processDeletedSyncQueue(), 100);
+};
+
+/**
+ * Process queued deleted records
+ * ใช้ Transaction สำหรับ Firebase เพื่อป้องกัน race condition
+ */
+const processDeletedSyncQueue = async () => {
+  if (deletedSyncQueue.length === 0) return;
+  if (typeof adapters === 'undefined') return;
+
+  while (deletedSyncQueue.length > 0) {
+    const { key, id, deletedAt } = deletedSyncQueue.shift();
+
+    try {
+      const configStr = localStorage.getItem(SYNC_CONFIG_KEY);
+      let config;
+      try { config = configStr ? JSON.parse(configStr) : null; } catch { config = null; }
+      if (!config || !config.provider) continue;
+
+      const adapter = adapters[config.provider];
+      if (!adapter) continue;
+
+      const dbKey = key.replace('ff_', '');
+
+      if (config.provider === 'firebase' && adapter.db) {
+        // Firebase: ใช้ Transaction เพื่อ atomic update
+        const ref = adapter.db.ref(dbKey);
+        await ref.transaction((currentData) => {
+          if (!currentData) return currentData;
+          const items = Array.isArray(currentData) ? currentData :
+            (currentData && typeof currentData === 'object' ? Object.values(currentData) : []);
+          return items.map(item => {
+            if (item && item.id === id) {
+              return { ...item, deleted: true, deletedAt, updatedAt: deletedAt };
+            }
+            return item;
+          });
+        });
+        console.log(`Sync: deleted ${key}/${id} synced to Firebase with Transaction`);
+
+      } else if (config.provider === 'firestore' && adapter.db) {
+        // Firestore: ใช้ Transaction
+        const docRef = adapter.db.collection('fish_farm').doc(key);
+        await adapter.db.runTransaction(async (transaction) => {
+          const doc = await transaction.get(docRef);
+          if (doc.exists) {
+            const data = doc.data().data || [];
+            const updated = data.map(item => {
+              if (item && item.id === id) {
+                return { ...item, deleted: true, deletedAt, updatedAt: deletedAt };
+              }
+              return item;
+            });
+            transaction.update(docRef, { data: updated, updatedAt: new Date() });
+          }
+        });
+        console.log(`Sync: deleted ${key}/${id} synced to Firestore with Transaction`);
+
+      } else if (config.provider === 'supabase' && adapter.client) {
+        // Supabase: ดึงข้อมูลมา update
+        const { data: existing } = await adapter.client
+          .from('fish_farm_sync')
+          .select('data')
+          .eq('key', key)
+          .single();
+
+        if (existing && existing.data) {
+          const updated = existing.data.map(item => {
+            if (item && item.id === id) {
+              return { ...item, deleted: true, deletedAt, updatedAt: deletedAt };
+            }
+            return item;
+          });
+          await adapter.client
+            .from('fish_farm_sync')
+            .update({ data: updated, updated_at: new Date().toISOString() })
+            .eq('key', key);
+        }
+        console.log(`Sync: deleted ${key}/${id} synced to Supabase`);
+      }
+    } catch (e) {
+      console.error('Sync delete to cloud error:', e);
+    }
+  }
+};
+
+/**
+ * กรอง records ที่ถูกลบออก (ใช้ตอนแสดงผล)
+ * @param {Array} items - array ของ records
+ * @returns {Array} records ที่ไม่ได้ถูกลบ
+ */
+const filterDeleted = (items) => {
+  if (!Array.isArray(items)) return [];
+  return items.filter(item => !item?.deleted);
+};
+
+/**
+ * Permanently delete old soft-deleted records (cleanup)
+ * ลบ records ที่ถูก soft delete เกิน 30 วัน
+ */
+const cleanupDeletedRecords = () => {
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+
+  SYNC_KEYS.forEach(key => {
+    try {
+      const data = localStorage.getItem(key);
+      if (!data) return;
+
+      const items = JSON.parse(data);
+      const cleaned = items.filter(item => {
+        // เก็บ record ที่ไม่ได้ลบ หรือลบไม่เกิน 30 วัน
+        if (!item?.deleted) return true;
+        return (item.deletedAt || 0) > thirtyDaysAgo;
+      });
+
+      if (cleaned.length !== items.length) {
+        localStorage.setItem(key, JSON.stringify(cleaned));
+        console.log(`Sync: cleaned up ${items.length - cleaned.length} old deleted records from ${key}`);
+      }
+    } catch (e) {
+      console.error('Cleanup error:', e);
     }
   });
-
-  if (changed) {
-    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(deleted));
-  }
 };
 
 // Export สำหรับ index.html ใช้เมื่อลบข้อมูล
 window.markAsDeleted = markAsDeleted;
+window.filterDeleted = filterDeleted;
 
 /**
  * แปลง Firebase Object เป็น Array
@@ -274,15 +463,15 @@ const toArray = (data) => {
  * @param {Array} cloudData - ข้อมูลจาก cloud
  * @returns {Array} ข้อมูลที่ merge แล้ว
  *
- * @algorithm
- * 1. ใส่ข้อมูล cloud ทั้งหมดลง Map (ยกเว้นที่ถูกลบแล้ว)
+ * @algorithm (Soft Delete Flag in Record)
+ * 1. ใส่ข้อมูล cloud ทั้งหมดลง Map
  * 2. วนลูป local data:
  *    - ถ้าไม่มีใน cloud → เพิ่มเข้าไป (ข้อมูลใหม่จาก local)
  *    - ถ้ามีใน cloud → เปรียบเทียบ timestamp:
  *      - local ใหม่กว่า → ใช้ local
  *      - cloud ใหม่กว่าหรือเท่ากัน → ใช้ cloud
- * 3. กรองข้อมูลที่ถูกลบออก
- * 4. Return ข้อมูลทั้งหมดจาก Map
+ * 3. Return ข้อมูลทั้งหมดจาก Map (รวม deleted records ด้วย)
+ * 4. กรอง deleted=true ออกตอนแสดงผลใน UI
  */
 const mergeArraysByTimestamp = (key, localData, cloudData) => {
   // ใช้ toArray เพื่อแปลง Firebase Object เป็น Array
@@ -290,19 +479,10 @@ const mergeArraysByTimestamp = (key, localData, cloudData) => {
   cloudData = toArray(cloudData);
 
   const merged = new Map();
-  const localIds = new Set(localData.map(item => item?.id).filter(Boolean));
 
-  // เพิ่มข้อมูล cloud ก่อน (ยกเว้นที่ถูกลบแล้ว)
+  // เพิ่มข้อมูล cloud ทั้งหมด (รวม deleted records)
   cloudData.forEach(item => {
     if (item && item.id) {
-      const cloudTs = getRecordTimestamp(item);
-
-      // เช็คว่าถูกลบหลังจาก cloud timestamp หรือไม่
-      if (isDeletedAfter(key, item.id, cloudTs)) {
-        console.log(`Sync: skipping deleted record ${key}/${item.id}`);
-        return; // ข้ามไป ไม่เอากลับมา
-      }
-
       merged.set(item.id, { ...item, _source: 'cloud' });
     }
   });
@@ -316,12 +496,12 @@ const mergeArraysByTimestamp = (key, localData, cloudData) => {
         // ไม่มีใน cloud = ข้อมูลใหม่จาก local
         merged.set(item.id, { ...item, _source: 'local', _deviceId: myDeviceId });
       } else {
-        // มีทั้งสองที่ = เปรียบเทียบ timestamp
-        const localTs = getRecordTimestamp(item);
-        const cloudTs = getRecordTimestamp(existing);
+        // มีทั้งสองที่ = เปรียบเทียบ timestamp (รวม deletedAt ด้วย)
+        const localTs = Math.max(getRecordTimestamp(item), item.deletedAt || 0);
+        const cloudTs = Math.max(getRecordTimestamp(existing), existing.deletedAt || 0);
 
         if (localTs > cloudTs) {
-          // local ใหม่กว่า
+          // local ใหม่กว่า (รวมถึงกรณี local ลบล่าสุด)
           merged.set(item.id, { ...item, _source: 'local', _deviceId: myDeviceId });
         } else if (localTs === cloudTs) {
           // timestamp เท่ากัน - ใช้ device ID เป็น tiebreaker
@@ -329,19 +509,7 @@ const mergeArraysByTimestamp = (key, localData, cloudData) => {
             merged.set(item.id, { ...item, _source: 'local', _deviceId: myDeviceId });
           }
         }
-      }
-    }
-  });
-
-  // ลบ records ที่ไม่มีใน local และถูก mark ว่าลบแล้ว
-  // (กรณีที่ cloud มีแต่ local ไม่มี = อาจเป็นข้อมูลที่ถูกลบ)
-  merged.forEach((item, id) => {
-    if (item._source === 'cloud' && !localIds.has(id)) {
-      // Cloud-only record - เช็คว่าถูกลบหรือไม่
-      const cloudTs = getRecordTimestamp(item);
-      if (isDeletedAfter(key, id, cloudTs)) {
-        merged.delete(id);
-        console.log(`Sync: removed cloud-only deleted record ${key}/${id}`);
+        // ถ้า cloud ใหม่กว่า ใช้ cloud (รวมถึงกรณี cloud ลบล่าสุด)
       }
     }
   });
@@ -355,7 +523,7 @@ const mergeArraysByTimestamp = (key, localData, cloudData) => {
 
 /**
  * Smart sync - เปรียบเทียบและ merge ข้อมูลก่อน sync
- * รองรับ soft delete (ไม่เอาข้อมูลที่ลบแล้วกลับมา)
+ * รองรับ soft delete flag (deleted records จะ sync ไปทุกเครื่อง)
  */
 const smartMergeData = (key, localData, cloudData) => {
   // แปลง Object เป็น Array ก่อน (Firebase ส่ง Object มา)
@@ -367,23 +535,18 @@ const smartMergeData = (key, localData, cloudData) => {
     return { merged: localArr, hasChanges: localArr.length > 0 };
   }
 
-  // ถ้าไม่มีข้อมูล local แต่มี cloud - ต้องเช็ค deleted IDs ก่อน
+  // ถ้าไม่มีข้อมูล local ใช้ cloud (รวม deleted records)
   if (localArr.length === 0) {
-    // กรอง cloud data โดยเอาเฉพาะที่ไม่ได้ถูกลบ
-    const filteredCloud = cloudArr.filter(item => {
-      if (!item || !item.id) return false;
-      const cloudTs = getRecordTimestamp(item);
-      return !isDeletedAfter(key, item.id, cloudTs);
-    });
-    return { merged: filteredCloud, hasChanges: filteredCloud.length > 0 };
+    return { merged: cloudArr, hasChanges: cloudArr.length > 0 };
   }
 
-  // Merge arrays by timestamp (พร้อมเช็ค deleted IDs)
-  const merged = mergeArraysByTimestamp(key, localData, cloudData);
+  // Merge arrays by timestamp (รวม deleted records ด้วย)
+  const merged = mergeArraysByTimestamp(key, localArr, cloudArr);
 
-  // เช็คว่ามีการเปลี่ยนแปลงหรือไม่
-  const hasChanges = JSON.stringify(merged) !== JSON.stringify(localData) ||
-                     JSON.stringify(merged) !== JSON.stringify(cloudData);
+  // เช็คว่ามีการเปลี่ยนแปลงจาก local หรือไม่ (เทียบ Array กับ Array เท่านั้น)
+  const mergedStr = JSON.stringify(merged);
+  const localStr = JSON.stringify(localArr);
+  const hasChanges = mergedStr !== localStr;
 
   return { merged, hasChanges };
 };
@@ -977,9 +1140,13 @@ const adapters = {
               localStorage.setItem(key, JSON.stringify(merged));
 
               // ถ้า local มีข้อมูลใหม่กว่า ต้อง sync กลับไป cloud
-              const cloudStr = JSON.stringify(cloudData);
+              // แปลง cloudData เป็น Array ก่อนเทียบ (ป้องกัน loop)
+              const cloudArr = toArray(cloudData);
+              const cloudArrStr = JSON.stringify(cloudArr);
               const mergedStr = JSON.stringify(merged);
-              if (cloudStr !== mergedStr) {
+
+              // เทียบ Array กับ Array เท่านั้น
+              if (cloudArrStr !== mergedStr) {
                 // Queue sync back with debounce to prevent rapid writes
                 pendingSyncBack.set(dbKey, merged);
 
@@ -997,7 +1164,7 @@ const adapters = {
                 }, SYNC_DEBOUNCE_MS); // รอก่อน sync กลับ (สำหรับ 4+ เครื่อง)
               }
 
-              onChange?.();
+
             }
           }
         });
@@ -1072,52 +1239,129 @@ const adapters = {
       }
     },
 
-    async syncToCloud() {
+    /**
+     * Smart Sync - ดึงข้อมูล cloud มา merge กับ local แล้ว sync กลับ
+     * ใช้ Transaction เพื่อป้องกัน race condition
+     */
+    async smartSync(retryCount = 0) {
       if (!this.db) return;
 
+      if (!acquireSyncLock()) {
+        console.log('Firestore: sync already in progress, skipping');
+        return;
+      }
+
+      isSyncing = true;
+      updateSyncStatus();
+
       try {
-        const batch = this.db.batch();
-        SYNC_KEYS.forEach(key => {
-          const data = localStorage.getItem(key);
-          if (data) {
-            const docRef = this.db.collection('fish_farm').doc(key);
-            batch.set(docRef, { data: JSON.parse(data), updatedAt: new Date() });
+        const snapshot = await this.db.collection('fish_farm').get();
+        const cloudData = {};
+        snapshot.forEach(doc => {
+          if (SYNC_KEYS.includes(doc.id)) {
+            cloudData[doc.id] = doc.data().data || [];
           }
         });
-        await batch.commit();
-        console.log('Firestore: synced to cloud');
+
+        const batch = this.db.batch();
+        let hasAnyChanges = false;
+
+        for (const key of SYNC_KEYS) {
+          const localRaw = localStorage.getItem(key);
+          const localData = safeJSONParse(localRaw, []);
+          const cloudKeyData = cloudData[key] || [];
+
+          const { merged, hasChanges } = smartMergeData(key, localData, cloudKeyData);
+
+          if (hasChanges) {
+            hasAnyChanges = true;
+            localStorage.setItem(key, JSON.stringify(merged));
+            const docRef = this.db.collection('fish_farm').doc(key);
+            batch.set(docRef, { data: merged, updatedAt: new Date() });
+          }
+        }
+
+        if (hasAnyChanges) {
+          await batch.commit();
+          console.log('Firestore: smart sync completed with changes');
+        } else {
+          console.log('Firestore: smart sync - no changes needed');
+        }
+
+        const metadata = getSyncMetadata();
+        metadata.lastSync = new Date().toISOString();
+        metadata.deviceId = getDeviceId();
+        saveSyncMetadata(metadata);
+
       } catch (e) {
-        console.error('Firestore sync error:', e);
+        console.error('Firestore smart sync error:', e);
+        if (retryCount < MAX_SYNC_RETRIES) {
+          releaseSyncLock();
+          setTimeout(() => this.smartSync(retryCount + 1), 2000 * (retryCount + 1));
+          return;
+        }
       }
+
+      isSyncing = false;
+      releaseSyncLock();
+      updateSyncStatus();
+    },
+
+    async syncToCloud() {
+      if (!this.db) return;
+      await this.smartSync();
     },
 
     async syncFromCloud() {
       if (!this.db) return;
-
-      try {
-        const snapshot = await this.db.collection('fish_farm').get();
-        snapshot.forEach(doc => {
-          const key = doc.id;
-          if (SYNC_KEYS.includes(key) && doc.data().data) {
-            localStorage.setItem(key, JSON.stringify(doc.data().data));
-          }
-        });
-        console.log('Firestore: synced from cloud');
-      } catch (e) {
-        console.error('Firestore sync error:', e);
-      }
+      await this.smartSync();
     },
 
     setupListeners(onChange) {
       if (!this.db) return;
 
+      let syncBackTimer = null;
+      const pendingSyncBack = new Map();
+
       const unsubscribe = this.db.collection('fish_farm').onSnapshot(snapshot => {
+        if (isProcessingListener) return;
+
         snapshot.docChanges().forEach(change => {
           if (change.type === 'modified' || change.type === 'added') {
             const key = change.doc.id;
             if (SYNC_KEYS.includes(key) && change.doc.data().data) {
-              localStorage.setItem(key, JSON.stringify(change.doc.data().data));
-              onChange?.();
+              const cloudData = change.doc.data().data;
+              const localRaw = localStorage.getItem(key);
+              const localData = safeJSONParse(localRaw, []);
+
+              const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
+
+              if (hasChanges) {
+                localStorage.setItem(key, JSON.stringify(merged));
+
+                // Sync back if local has newer data
+                const cloudStr = JSON.stringify(cloudData);
+                const mergedStr = JSON.stringify(merged);
+                if (cloudStr !== mergedStr) {
+                  pendingSyncBack.set(key, merged);
+
+                  if (syncBackTimer) clearTimeout(syncBackTimer);
+                  syncBackTimer = setTimeout(() => {
+                    isProcessingListener = true;
+                    const batch = this.db.batch();
+                    pendingSyncBack.forEach((data, k) => {
+                      const docRef = this.db.collection('fish_farm').doc(k);
+                      batch.set(docRef, { data, updatedAt: new Date() });
+                    });
+                    pendingSyncBack.clear();
+                    batch.commit()
+                      .catch(e => console.error('Firestore: error syncing back', e))
+                      .finally(() => { isProcessingListener = false; });
+                  }, SYNC_DEBOUNCE_MS);
+                }
+
+
+              }
             }
           }
         });
@@ -1189,60 +1433,141 @@ const adapters = {
       }
     },
 
-    async syncToCloud() {
+    /**
+     * Smart Sync - ดึงข้อมูล cloud มา merge กับ local แล้ว sync กลับ
+     */
+    async smartSync(retryCount = 0) {
       if (!this.client) return;
 
-      try {
-        for (const key of SYNC_KEYS) {
-          const data = localStorage.getItem(key);
-          if (data) {
-            await this.client
-              .from('fish_farm_sync')
-              .upsert({
-                key,
-                data: JSON.parse(data),
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'key' });
-          }
-        }
-        console.log('Supabase: synced to cloud');
-      } catch (e) {
-        console.error('Supabase sync error:', e);
+      if (!acquireSyncLock()) {
+        console.log('Supabase: sync already in progress, skipping');
+        return;
       }
-    },
 
-    async syncFromCloud() {
-      if (!this.client) return;
+      isSyncing = true;
+      updateSyncStatus();
 
       try {
-        const { data, error } = await this.client
+        // ดึงข้อมูลจาก cloud
+        const { data: cloudRows, error } = await this.client
           .from('fish_farm_sync')
           .select('*');
 
         if (error) throw error;
 
-        data?.forEach(row => {
+        const cloudData = {};
+        cloudRows?.forEach(row => {
           if (SYNC_KEYS.includes(row.key)) {
-            localStorage.setItem(row.key, JSON.stringify(row.data));
+            cloudData[row.key] = row.data || [];
           }
         });
-        console.log('Supabase: synced from cloud');
+
+        let hasAnyChanges = false;
+
+        for (const key of SYNC_KEYS) {
+          const localRaw = localStorage.getItem(key);
+          const localData = safeJSONParse(localRaw, []);
+          const cloudKeyData = cloudData[key] || [];
+
+          const { merged, hasChanges } = smartMergeData(key, localData, cloudKeyData);
+
+          if (hasChanges) {
+            hasAnyChanges = true;
+            localStorage.setItem(key, JSON.stringify(merged));
+
+            // อัพเดต cloud
+            await this.client
+              .from('fish_farm_sync')
+              .upsert({
+                key,
+                data: merged,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'key' });
+          }
+        }
+
+        if (hasAnyChanges) {
+          console.log('Supabase: smart sync completed with changes');
+        } else {
+          console.log('Supabase: smart sync - no changes needed');
+        }
+
+        const metadata = getSyncMetadata();
+        metadata.lastSync = new Date().toISOString();
+        metadata.deviceId = getDeviceId();
+        saveSyncMetadata(metadata);
+
       } catch (e) {
-        console.error('Supabase sync error:', e);
+        console.error('Supabase smart sync error:', e);
+        if (retryCount < MAX_SYNC_RETRIES) {
+          releaseSyncLock();
+          setTimeout(() => this.smartSync(retryCount + 1), 2000 * (retryCount + 1));
+          return;
+        }
       }
+
+      isSyncing = false;
+      releaseSyncLock();
+      updateSyncStatus();
+    },
+
+    async syncToCloud() {
+      if (!this.client) return;
+      await this.smartSync();
+    },
+
+    async syncFromCloud() {
+      if (!this.client) return;
+      await this.smartSync();
     },
 
     setupListeners(onChange) {
       if (!this.client) return;
 
+      let syncBackTimer = null;
+
       const channel = this.client
         .channel('fish_farm_changes')
         .on('postgres_changes',
           { event: '*', schema: 'public', table: 'fish_farm_sync' },
-          (payload) => {
+          async (payload) => {
+            if (isProcessingListener) return;
+
             if (payload.new && SYNC_KEYS.includes(payload.new.key)) {
-              localStorage.setItem(payload.new.key, JSON.stringify(payload.new.data));
-              onChange?.();
+              const key = payload.new.key;
+              const cloudData = payload.new.data || [];
+              const localRaw = localStorage.getItem(key);
+              const localData = safeJSONParse(localRaw, []);
+
+              const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
+
+              if (hasChanges) {
+                localStorage.setItem(key, JSON.stringify(merged));
+
+                // Sync back if local has newer data
+                const cloudStr = JSON.stringify(cloudData);
+                const mergedStr = JSON.stringify(merged);
+                if (cloudStr !== mergedStr) {
+                  if (syncBackTimer) clearTimeout(syncBackTimer);
+                  syncBackTimer = setTimeout(async () => {
+                    isProcessingListener = true;
+                    try {
+                      await this.client
+                        .from('fish_farm_sync')
+                        .upsert({
+                          key,
+                          data: merged,
+                          updated_at: new Date().toISOString()
+                        }, { onConflict: 'key' });
+                    } catch (e) {
+                      console.error('Supabase: error syncing back', e);
+                    }
+                    isProcessingListener = false;
+                  }, SYNC_DEBOUNCE_MS);
+                }
+
+
+              }
             }
           }
         )
@@ -1352,7 +1677,7 @@ const adapters = {
       this.client.collection(this.collection).subscribe('*', (e) => {
         if (e.record && SYNC_KEYS.includes(e.record.key)) {
           localStorage.setItem(e.record.key, JSON.stringify(e.record.data));
-          onChange?.();
+
         }
       });
 
@@ -1499,7 +1824,7 @@ const adapters = {
       // MongoDB Data API doesn't support realtime - poll every 30s
       const interval = setInterval(async () => {
         await this.syncFromCloud();
-        onChange?.();
+
       }, 30000);
 
       syncListeners.push(() => clearInterval(interval));
@@ -1608,7 +1933,7 @@ const adapters = {
       // Poll every 60s
       const interval = setInterval(async () => {
         await this.syncFromCloud();
-        onChange?.();
+
       }, 60000);
 
       syncListeners.push(() => clearInterval(interval));
@@ -1726,7 +2051,7 @@ const adapters = {
       // Poll every 30s
       const interval = setInterval(async () => {
         await this.syncFromCloud();
-        onChange?.();
+
       }, 30000);
 
       syncListeners.push(() => clearInterval(interval));
@@ -2146,12 +2471,11 @@ window.saveAndConnect = async () => {
     providerInstance = adapter;
 
     if (await adapter.init(config)) {
-      adapter.setupListeners?.(() => {
-        if (window.render) window.render();
-      });
+      adapter.setupListeners?.();
       await adapter.syncFromCloud();
       closeSyncModal();
-      if (window.render) window.render();
+      smartRender();
+
     } else {
       showToast('เชื่อมต่อไม่สำเร็จ', 'error');
     }
@@ -2161,9 +2485,11 @@ window.saveAndConnect = async () => {
 window.useLocalOnly = () => {
   localStorage.setItem(LOCAL_ONLY_KEY, 'true');
   closeSyncModal();
+
   updateSyncStatus();
   showToast('เปิด Offline Mode', 'success');
-  if (window.render) window.render();
+  smartRender();
+
 };
 
 // ===== Unlock Modal =====
@@ -2269,6 +2595,7 @@ window.closeForgotPasswordModal = () => {
 // ===== Change Password Modal =====
 window.showChangePasswordModal = () => {
   closeSyncModal();
+      smartRender();
 
   const modal = document.createElement('div');
   modal.id = 'change-password-modal';
@@ -2504,8 +2831,8 @@ const startPeriodicSync = () => {
  * 7. Sync ข้อมูลเริ่มต้น
  */
 const initCloudSync = async () => {
-  // Cleanup deleted IDs ที่เก่าเกิน 7 วัน
-  cleanupDeletedIds();
+  // Cleanup soft deleted records ที่เก่าเกิน 30 วัน
+  cleanupDeletedRecords();
 
   // สร้าง sync indicator ที่มุมบนขวา
   createSyncStatusUI();
@@ -2535,9 +2862,8 @@ const initCloudSync = async () => {
   if (adapter) {
     providerInstance = adapter;
     if (await adapter.init(savedConfig.config)) {
-      adapter.setupListeners?.(() => {
-        if (window.render) window.render();
-      });
+      // setupListeners เรียก smartRender โดยตรง (smartRender มี debounce ในตัว)
+      adapter.setupListeners?.();
       enhanceStorageWithSync();
       startPeriodicSync();
 
@@ -2561,7 +2887,8 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && providerInstance && isOnline && !isLocalOnly()) {
     try {
       await providerInstance.syncFromCloud?.();
-      if (window.render) window.render();
+      smartRender();
+
     } catch (err) {
       console.error('Visibility sync error:', err);
     }
