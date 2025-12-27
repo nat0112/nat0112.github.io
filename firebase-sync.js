@@ -107,7 +107,8 @@ const SYNC_KEYS = [
   'ff_expenses',       // ค่าใช้จ่าย
   'ff_harvests',       // การจับปลา/เก็บเกี่ยว
   'ff_mortalities',    // บันทึกปลาตาย
-  'ff_fish_types'      // ชนิดปลา
+  'ff_fish_types',     // ชนิดปลา
+  'ff_guides'          // คู่มือการเลี้ยง
 ];
 
 // =============================================================================
@@ -1055,7 +1056,6 @@ const adapters = {
 
           // ใช้ smart merge
           const { merged, hasChanges, localChanged, cloudNeedsUpdate } = smartMergeData(key, localData, cloudKeyData);
-          console.log(`smartSync [${key}]: hasChanges=${hasChanges} localChanged=${localChanged} cloudNeedsUpdate=${cloudNeedsUpdate}`);
 
           if (hasChanges) {
             hasAnyChanges = true;
@@ -1073,9 +1073,6 @@ const adapters = {
         // 3. อัพเดต cloud ถ้ามีการเปลี่ยนแปลง
         if (hasAnyChanges && Object.keys(updates).length > 0) {
           await this.db.ref().update(updates);
-          console.log('Firebase: smart sync completed with changes');
-        } else {
-          console.log('Firebase: smart sync - no changes needed');
         }
 
         // 4. บันทึกเวลา sync ล่าสุด พร้อม device ID
@@ -1128,38 +1125,29 @@ const adapters = {
     },
 
     setupListeners(onChange) {
-      console.log('Firebase: setupListeners called, db=', !!this.db);
-      if (!this.db) {
-        console.warn('Firebase: setupListeners aborted - no db connection');
-        return;
-      }
+      if (!this.db) return;
 
       // Debounce timer for sync back to cloud (prevent rapid fire)
       let syncBackTimer = null;
       const pendingSyncBack = new Map();
 
-      console.log('Firebase: setting up listeners for', SYNC_KEYS.length, 'keys');
       SYNC_KEYS.forEach(key => {
         const dbKey = key.replace('ff_', '');
         const ref = this.db.ref(dbKey);
-        console.log('Firebase: attaching listener for', dbKey);
 
         const listener = ref.on('value', (snapshot) => {
-          console.log(`Firebase: listener triggered for ${dbKey}`);
           // Prevent infinite loop: skip if we're currently writing to cloud
           if (isProcessingListener) {
             return;
           }
 
           const cloudData = snapshot.val();
-          console.log(`Firebase: received update for ${dbKey}`, cloudData !== null ? "with data" : "empty");
           if (cloudData !== null) {
             // ใช้ safeJSONParse แทน JSON.parse
             const localRaw = localStorage.getItem(key);
             const localData = safeJSONParse(localRaw, []);
 
             const { merged, hasChanges, localChanged, cloudNeedsUpdate } = smartMergeData(key, localData, cloudData);
-            console.log(`Firebase listener [${key}]: hasChanges=${hasChanges} localChanged=${localChanged} cloudNeedsUpdate=${cloudNeedsUpdate} local:${localData.length} cloud:${toArray(cloudData).length} merged:${merged.length}`);
 
             if (hasChanges) {
               // Update local only if localChanged
@@ -1363,7 +1351,6 @@ const adapters = {
               const localData = safeJSONParse(localRaw, []);
 
               const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
-            console.log(`Firebase listener [${key}]: hasChanges=`, hasChanges, "local:", localData.length, "cloud:", toArray(cloudData).length);
 
               if (hasChanges) {
                 localStorage.setItem(key, JSON.stringify(merged));
@@ -1570,7 +1557,6 @@ const adapters = {
               const localData = safeJSONParse(localRaw, []);
 
               const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
-            console.log(`Firebase listener [${key}]: hasChanges=`, hasChanges, "local:", localData.length, "cloud:", toArray(cloudData).length);
 
               if (hasChanges) {
                 localStorage.setItem(key, JSON.stringify(merged));
@@ -2804,21 +2790,17 @@ let pendingSyncKeys = new Set();        // Keys ที่รอ sync
  */
 const debouncedSyncToCloud = () => {
   if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
-  console.log('debouncedSyncToCloud: scheduled, pending keys=', [...pendingSyncKeys]);
 
   syncDebounceTimer = setTimeout(async () => {
     if (!providerInstance || !isOnline || isLocalOnly()) {
-      console.log('debouncedSyncToCloud: skipped - provider=', !!providerInstance, 'online=', isOnline, 'localOnly=', isLocalOnly());
       return;
     }
 
-    console.log('debouncedSyncToCloud: executing sync...');
     isSyncing = true;
     updateSyncStatus();
 
     try {
       await providerInstance.syncToCloud?.();
-      console.log('debouncedSyncToCloud: sync complete');
       pendingSyncKeys.clear();
     } catch (err) {
       console.error('Debounced sync error:', err);
@@ -2837,7 +2819,6 @@ const debouncedSyncToCloud = () => {
  */
 const enhanceStorageWithSync = () => {
   if (!window.storage) return;
-  console.log('enhanceStorageWithSync: hooking storage.set');
 
   const originalSet = window.storage.set;
 
@@ -2846,7 +2827,6 @@ const enhanceStorageWithSync = () => {
 
     // ถ้าเป็น key ที่ต้อง sync → queue ไว้
     if (providerInstance && !isLocalOnly() && SYNC_KEYS.includes(key)) {
-      console.log('storage.set: queuing sync for', key);
       pendingSyncKeys.add(key);
       debouncedSyncToCloud();
     }
@@ -2916,15 +2896,12 @@ const initCloudSync = async () => {
 
   currentProvider = savedConfig.provider;
   const adapter = adapters[currentProvider];
-  console.log('initCloudSync: provider=', currentProvider, 'adapter=', !!adapter);
 
   if (adapter) {
     providerInstance = adapter;
     const initResult = await adapter.init(savedConfig.config);
-    console.log('initCloudSync: init result=', initResult);
     if (initResult) {
       // setupListeners เรียก smartRender โดยตรง (smartRender มี debounce ในตัว)
-      console.log('initCloudSync: calling setupListeners');
       adapter.setupListeners?.();
       enhanceStorageWithSync();
       startPeriodicSync();
