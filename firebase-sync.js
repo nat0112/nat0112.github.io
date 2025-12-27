@@ -2424,6 +2424,15 @@ const showSyncSetupModal = () => {
             ยกเลิก
           </button>
         </div>
+
+        <!-- Advanced -->
+        <div class="border-t border-slate-700 pt-3 mt-3">
+          <p class="text-xs text-slate-500 mb-2 text-center">ขั้นสูง</p>
+          <button onclick="forceCleanFirebase()" class="w-full py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-xl transition-colors text-sm border border-red-500/30">
+            🧹 ล้างข้อมูลเก่าใน Firebase
+          </button>
+          <p class="text-xs text-slate-500 mt-1 text-center">อัพโหลดข้อมูลในเครื่องนี้ไปทับ Firebase</p>
+        </div>
       </div>
     </div>
   `;
@@ -2761,6 +2770,49 @@ window.resetSyncConfig = () => {
     isOnline = false;
     showToast('รีเซ็ตการตั้งค่าแล้ว', 'success');
     showSyncSetupModal();
+  }
+};
+
+/**
+ * Force push local data to Firebase (overwrite cloud)
+ * ใช้เมื่อข้อมูลเก่าใน Firebase ไม่ถูกต้อง
+ */
+window.forceCleanFirebase = async () => {
+  if (!confirm('⚠️ คำเตือน!\n\nการดำเนินการนี้จะ:\n• อัพโหลดข้อมูลในเครื่องนี้ไปทับ Firebase\n• ข้อมูลที่ลบแล้วจะถูกทำเครื่องหมาย deleted\n• ข้อมูลเก่าใน Firebase จะถูกแทนที่\n\nต้องการดำเนินการ?')) {
+    return;
+  }
+
+  if (!providerInstance || !isOnline) {
+    showToast('ไม่ได้เชื่อมต่อ Firebase', 'error');
+    return;
+  }
+
+  showToast('กำลังอัพโหลดข้อมูล...', 'info');
+
+  try {
+    const adapter = adapters.firebase;
+    if (!adapter || !adapter.db) {
+      showToast('Firebase ไม่พร้อมใช้งาน', 'error');
+      return;
+    }
+
+    let successCount = 0;
+    for (const key of SYNC_KEYS) {
+      const localRaw = localStorage.getItem(key);
+      const localData = localRaw ? JSON.parse(localRaw) : [];
+
+      if (localData.length > 0) {
+        // Force push to Firebase (overwrite)
+        await adapter.db.ref(`fish_farm/${key}`).set(localData);
+        successCount++;
+      }
+    }
+
+    showToast(`อัพโหลดสำเร็จ ${successCount} รายการ`, 'success');
+    closeSyncModal();
+  } catch (err) {
+    console.error('Force clean error:', err);
+    showToast('เกิดข้อผิดพลาด: ' + err.message, 'error');
   }
 };
 
