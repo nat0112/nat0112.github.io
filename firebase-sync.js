@@ -547,12 +547,19 @@ const smartMergeData = (key, localData, cloudData) => {
   // Merge arrays by timestamp (รวม deleted records ด้วย)
   const merged = mergeArraysByTimestamp(key, localArr, cloudArr);
 
-  // เช็คว่ามีการเปลี่ยนแปลงจาก local หรือไม่ (เทียบ Array กับ Array เท่านั้น)
+  // เช็คว่ามีการเปลี่ยนแปลงจาก local หรือ cloud หรือไม่
   const mergedStr = JSON.stringify(merged);
   const localStr = JSON.stringify(localArr);
-  const hasChanges = mergedStr !== localStr;
+  const cloudStr = JSON.stringify(cloudArr);
 
-  return { merged, hasChanges };
+  // hasChanges = true ถ้า merged ไม่ตรงกับ local หรือ cloud
+  // - merged !== local → local ต้อง update
+  // - merged !== cloud → cloud ต้อง update
+  const localChanged = mergedStr !== localStr;
+  const cloudNeedsUpdate = mergedStr !== cloudStr;
+  const hasChanges = localChanged || cloudNeedsUpdate;
+
+  return { merged, hasChanges, localChanged, cloudNeedsUpdate };
 };
 
 // =============================================================================
@@ -1047,14 +1054,19 @@ const adapters = {
           const cloudKeyData = cloudData[dbKey] || [];
 
           // ใช้ smart merge
-          const { merged, hasChanges } = smartMergeData(key, localData, cloudKeyData);
+          const { merged, hasChanges, localChanged, cloudNeedsUpdate } = smartMergeData(key, localData, cloudKeyData);
+          console.log(`smartSync [${key}]: hasChanges=${hasChanges} localChanged=${localChanged} cloudNeedsUpdate=${cloudNeedsUpdate}`);
 
           if (hasChanges) {
             hasAnyChanges = true;
-            // อัพเดต local storage
-            localStorage.setItem(key, JSON.stringify(merged));
-            // เตรียม update ไป cloud
-            updates[dbKey] = merged;
+            // อัพเดต local storage เฉพาะเมื่อ local เปลี่ยน
+            if (localChanged) {
+              localStorage.setItem(key, JSON.stringify(merged));
+            }
+            // เตรียม update ไป cloud เมื่อ cloud ต้อง update
+            if (cloudNeedsUpdate) {
+              updates[dbKey] = merged;
+            }
           }
         }
 
@@ -1146,14 +1158,16 @@ const adapters = {
             const localRaw = localStorage.getItem(key);
             const localData = safeJSONParse(localRaw, []);
 
-            const { merged, hasChanges } = smartMergeData(key, localData, cloudData);
-            console.log(`Firebase listener [${key}]: hasChanges=`, hasChanges, "local:", localData.length, "cloud:", toArray(cloudData).length);
+            const { merged, hasChanges, localChanged, cloudNeedsUpdate } = smartMergeData(key, localData, cloudData);
+            console.log(`Firebase listener [${key}]: hasChanges=${hasChanges} localChanged=${localChanged} cloudNeedsUpdate=${cloudNeedsUpdate} local:${localData.length} cloud:${toArray(cloudData).length} merged:${merged.length}`);
 
             if (hasChanges) {
-              localStorage.setItem(key, JSON.stringify(merged));
+              // Update local only if localChanged
+              if (localChanged) {
+                localStorage.setItem(key, JSON.stringify(merged));
+              }
 
               // ถ้า local มีข้อมูลใหม่กว่า ต้อง sync กลับไป cloud
-              // แปลง cloudData เป็น Array ก่อนเทียบ (ป้องกัน loop)
               const cloudArr = toArray(cloudData);
               const cloudArrStr = JSON.stringify(cloudArr);
               const mergedStr = JSON.stringify(merged);
