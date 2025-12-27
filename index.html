@@ -358,6 +358,24 @@
     // Helper function to filter out soft-deleted records
     const filterDeleted = (items) => (items || []).filter(item => !item?.deleted);
 
+    // Fallback markAsDeleted function (used when cloud sync is not enabled)
+    // firebase-sync.js will override this with a sync-enabled version
+    if (!window.markAsDeleted) {
+      window.markAsDeleted = (key, id) => {
+        const items = JSON.parse(localStorage.getItem(key) || '[]');
+        const index = items.findIndex(item => item.id === id);
+        if (index !== -1) {
+          items[index] = {
+            ...items[index],
+            deleted: true,
+            deletedAt: Date.now(),
+            updatedAt: Date.now()
+          };
+          localStorage.setItem(key, JSON.stringify(items));
+        }
+      };
+    }
+
     // ===== Database with validation =====
     const db = {
       ponds: {
@@ -366,7 +384,7 @@
         create: (name) => {
           if (!validate.required(name, 'ชื่อบ่อ')) return null;
           const ponds = storage.get(KEYS.PONDS);
-          if (ponds.some(p => p.name.toLowerCase() === name.trim().toLowerCase())) {
+          if (ponds.some(p => !p.deleted && p.name.toLowerCase() === name.trim().toLowerCase())) {
             showToast('ชื่อบ่อซ้ำ', 'error');
             return null;
           }
@@ -411,7 +429,7 @@
             // First time - copy defaults
             DEFAULT_FISH_TYPES.forEach(t => types.push(t));
           }
-          if (types.some(t => t.name.toLowerCase() === data.name.trim().toLowerCase())) {
+          if (types.some(t => !t.deleted && t.name.toLowerCase() === data.name.trim().toLowerCase())) {
             showToast('ชื่อชนิดปลาซ้ำ', 'error');
             return null;
           }
