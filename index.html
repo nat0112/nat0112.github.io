@@ -369,7 +369,7 @@
           const ponds = storage.get(KEYS.PONDS);
           const i = ponds.findIndex(p => p.id === id);
           if (i >= 0) {
-            ponds[i] = { ...ponds[i], ...data };
+            ponds[i] = { ...ponds[i], ...data, updatedAt: new Date().toISOString() };
             storage.set(KEYS.PONDS, ponds);
           }
         },
@@ -428,7 +428,7 @@
               editedAt: new Date().toISOString(),
               prev: { name: old.name, feedType: old.feedType, avgWeight: old.avgWeight }
             }];
-            types[i] = { ...old, ...data, editHistory: history };
+            types[i] = { ...old, ...data, editHistory: history, updatedAt: new Date().toISOString() };
             if (storage.set(KEYS.FISH_TYPES, types)) {
               showToast('แก้ไขชนิดปลาสำเร็จ', 'success');
             }
@@ -468,6 +468,7 @@
           if (i >= 0) {
             cycles[i].status = 'completed';
             cycles[i].endDate = new Date().toISOString();
+            cycles[i].updatedAt = new Date().toISOString();
             storage.set(KEYS.CYCLES, cycles);
             db.ponds.update(cycles[i].pondId, { status: 'empty' });
           }
@@ -510,7 +511,7 @@
               editedAt: new Date().toISOString(),
               prev: { name: old.name, type: old.type, brand: old.brand, sizeNumber: old.sizeNumber, pricePerKg: old.pricePerKg }
             }];
-            feeds[i] = { ...old, ...data, editHistory: history };
+            feeds[i] = { ...old, ...data, editHistory: history, updatedAt: new Date().toISOString() };
             if (storage.set(KEYS.FEEDS, feeds)) {
               showToast('แก้ไขอาหารสำเร็จ', 'success');
             }
@@ -545,7 +546,7 @@
               editedAt: new Date().toISOString(),
               prev: { name: old.name, description: old.description, suppType: old.suppType, price: old.price, unit: old.unit }
             }];
-            supps[i] = { ...old, ...data, editHistory: history };
+            supps[i] = { ...old, ...data, editHistory: history, updatedAt: new Date().toISOString() };
             if (storage.set(KEYS.SUPPLEMENTS, supps)) {
               showToast('แก้ไขวิตามินสำเร็จ', 'success');
             }
@@ -581,7 +582,7 @@
               editedAt: new Date().toISOString(),
               prev: { name: old.name, description: old.description, medType: old.medType, price: old.price, unit: old.unit, usageDetails: old.usageDetails }
             }];
-            meds[i] = { ...old, ...data, editHistory: history };
+            meds[i] = { ...old, ...data, editHistory: history, updatedAt: new Date().toISOString() };
             if (storage.set(KEYS.MEDICINES, meds)) {
               showToast('แก้ไขยารักษาโรคสำเร็จ', 'success');
             }
@@ -622,7 +623,7 @@
               editedAt: new Date().toISOString(),
               prev: { feedId: old.feedId, weightKg: old.weightKg, time: old.time }
             }];
-            logs[i] = { ...old, ...data, editHistory: history };
+            logs[i] = { ...old, ...data, editHistory: history, updatedAt: new Date().toISOString() };
             if (storage.set(KEYS.FEEDING_LOGS, logs)) {
               showToast('แก้ไขสำเร็จ', 'success');
             }
