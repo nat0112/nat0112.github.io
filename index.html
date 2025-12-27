@@ -377,12 +377,19 @@
           // Also delete related cycles and their data
           const cycles = storage.get(KEYS.CYCLES).filter(c => c.pondId === id);
           cycles.forEach(cycle => {
+            // Mark related records as deleted for sync
+            storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId === cycle.id).forEach(l => window.markAsDeleted?.(KEYS.FEEDING_LOGS, l.id));
+            storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId === cycle.id).forEach(w => window.markAsDeleted?.(KEYS.WATER_QUALITY, w.id));
+            storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycle.id).forEach(e => window.markAsDeleted?.(KEYS.EXPENSES, e.id));
+            storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycle.id).forEach(h => window.markAsDeleted?.(KEYS.HARVESTS, h.id));
             storage.set(KEYS.FEEDING_LOGS, storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId !== cycle.id));
             storage.set(KEYS.WATER_QUALITY, storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId !== cycle.id));
             storage.set(KEYS.EXPENSES, storage.get(KEYS.EXPENSES).filter(e => e.cycleId !== cycle.id));
             storage.set(KEYS.HARVESTS, storage.get(KEYS.HARVESTS).filter(h => h.cycleId !== cycle.id));
+            window.markAsDeleted?.(KEYS.CYCLES, cycle.id);
           });
           storage.set(KEYS.CYCLES, storage.get(KEYS.CYCLES).filter(c => c.pondId !== id));
+          window.markAsDeleted?.(KEYS.PONDS, id);
           storage.set(KEYS.PONDS, storage.get(KEYS.PONDS).filter(p => p.id !== id));
           showToast('ลบบ่อสำเร็จ', 'success');
         }
@@ -439,6 +446,7 @@
           if (types.length === 0) {
             types = [...DEFAULT_FISH_TYPES];
           }
+          window.markAsDeleted?.(KEYS.FISH_TYPES, id);
           types = types.filter(t => t.id !== id);
           storage.set(KEYS.FISH_TYPES, types);
           showToast('ลบชนิดปลาสำเร็จ', 'success');
@@ -476,10 +484,16 @@
         reset: (pondId) => {
           const cycle = db.cycles.getActive(pondId);
           if (cycle) {
+            // Mark related records as deleted for sync
+            storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId === cycle.id).forEach(l => window.markAsDeleted?.(KEYS.FEEDING_LOGS, l.id));
+            storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId === cycle.id).forEach(w => window.markAsDeleted?.(KEYS.WATER_QUALITY, w.id));
+            storage.get(KEYS.EXPENSES).filter(e => e.cycleId === cycle.id).forEach(e => window.markAsDeleted?.(KEYS.EXPENSES, e.id));
+            storage.get(KEYS.HARVESTS).filter(h => h.cycleId === cycle.id).forEach(h => window.markAsDeleted?.(KEYS.HARVESTS, h.id));
             storage.set(KEYS.FEEDING_LOGS, storage.get(KEYS.FEEDING_LOGS).filter(l => l.cycleId !== cycle.id));
             storage.set(KEYS.WATER_QUALITY, storage.get(KEYS.WATER_QUALITY).filter(w => w.cycleId !== cycle.id));
             storage.set(KEYS.EXPENSES, storage.get(KEYS.EXPENSES).filter(e => e.cycleId !== cycle.id));
             storage.set(KEYS.HARVESTS, storage.get(KEYS.HARVESTS).filter(h => h.cycleId !== cycle.id));
+            window.markAsDeleted?.(KEYS.CYCLES, cycle.id);
             storage.set(KEYS.CYCLES, storage.get(KEYS.CYCLES).filter(c => c.id !== cycle.id));
             db.ponds.update(pondId, { status: 'empty' });
             showToast('รีเซ็ตบ่อสำเร็จ', 'success');
@@ -518,6 +532,7 @@
           }
         },
         delete: (id) => {
+          window.markAsDeleted?.(KEYS.FEEDS, id);
           storage.set(KEYS.FEEDS, storage.get(KEYS.FEEDS).filter(f => f.id !== id));
           showToast('ลบอาหารสำเร็จ', 'success');
         }
@@ -553,6 +568,7 @@
           }
         },
         delete: (id) => {
+          window.markAsDeleted?.(KEYS.SUPPLEMENTS, id);
           storage.set(KEYS.SUPPLEMENTS, storage.get(KEYS.SUPPLEMENTS).filter(s => s.id !== id));
           showToast('ลบวิตามินสำเร็จ', 'success');
         }
@@ -589,6 +605,7 @@
           }
         },
         delete: (id) => {
+          window.markAsDeleted?.(KEYS.MEDICINES, id);
           storage.set(KEYS.MEDICINES, storage.get(KEYS.MEDICINES).filter(m => m.id !== id));
           showToast('ลบยารักษาโรคสำเร็จ', 'success');
         }
@@ -630,6 +647,7 @@
           }
         },
         delete: (id) => {
+          window.markAsDeleted?.(KEYS.FEEDING_LOGS, id);
           storage.set(KEYS.FEEDING_LOGS, storage.get(KEYS.FEEDING_LOGS).filter(l => l.id !== id));
           showToast('ลบมื้ออาหารสำเร็จ', 'success');
         },
@@ -672,6 +690,7 @@
           return null;
         },
         delete: (id) => {
+          window.markAsDeleted?.(KEYS.EXPENSES, id);
           storage.set(KEYS.EXPENSES, storage.get(KEYS.EXPENSES).filter(e => e.id !== id));
           showToast('ลบค่าใช้จ่ายสำเร็จ', 'success');
         }
@@ -723,6 +742,7 @@
           return null;
         },
         delete: (id) => {
+          window.markAsDeleted?.(KEYS.MORTALITIES, id);
           storage.set(KEYS.MORTALITIES, storage.get(KEYS.MORTALITIES).filter(m => m.id !== id));
           showToast('ลบบันทึกสำเร็จ', 'success');
         },
