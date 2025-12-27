@@ -1,20 +1,24 @@
 // Fish Farm Pro - Service Worker
-const CACHE_NAME = 'fish-farm-v1.1.0';
+const CACHE_NAME = 'fish-farm-v1.2.0';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png'
+  './',
+  './index.html',
+  './manifest.json',
+  './icons/icon-192x192.png',
+  './icons/icon-512x512.png'
 ];
 
-// Install event - cache assets
+// Install event - cache assets (with fallback for failed requests)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        // Cache each file individually, ignore failures
+        return Promise.allSettled(
+          urlsToCache.map(url =>
+            cache.add(url).catch(err => console.warn('Failed to cache:', url, err))
+          )
+        );
       })
       .then(() => self.skipWaiting())
   );
@@ -65,7 +69,7 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() => {
         // Return offline page if available
-        return caches.match('/index.html');
+        return caches.match('./index.html');
       })
   );
 });
