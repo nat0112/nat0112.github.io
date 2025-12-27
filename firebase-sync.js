@@ -1116,17 +1116,24 @@ const adapters = {
     },
 
     setupListeners(onChange) {
-      if (!this.db) return;
+      console.log('Firebase: setupListeners called, db=', !!this.db);
+      if (!this.db) {
+        console.warn('Firebase: setupListeners aborted - no db connection');
+        return;
+      }
 
       // Debounce timer for sync back to cloud (prevent rapid fire)
       let syncBackTimer = null;
       const pendingSyncBack = new Map();
 
+      console.log('Firebase: setting up listeners for', SYNC_KEYS.length, 'keys');
       SYNC_KEYS.forEach(key => {
         const dbKey = key.replace('ff_', '');
         const ref = this.db.ref(dbKey);
+        console.log('Firebase: attaching listener for', dbKey);
 
         const listener = ref.on('value', (snapshot) => {
+          console.log(`Firebase: listener triggered for ${dbKey}`);
           // Prevent infinite loop: skip if we're currently writing to cloud
           if (isProcessingListener) {
             return;
@@ -2783,15 +2790,21 @@ let pendingSyncKeys = new Set();        // Keys ที่รอ sync
  */
 const debouncedSyncToCloud = () => {
   if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+  console.log('debouncedSyncToCloud: scheduled, pending keys=', [...pendingSyncKeys]);
 
   syncDebounceTimer = setTimeout(async () => {
-    if (!providerInstance || !isOnline || isLocalOnly()) return;
+    if (!providerInstance || !isOnline || isLocalOnly()) {
+      console.log('debouncedSyncToCloud: skipped - provider=', !!providerInstance, 'online=', isOnline, 'localOnly=', isLocalOnly());
+      return;
+    }
 
+    console.log('debouncedSyncToCloud: executing sync...');
     isSyncing = true;
     updateSyncStatus();
 
     try {
       await providerInstance.syncToCloud?.();
+      console.log('debouncedSyncToCloud: sync complete');
       pendingSyncKeys.clear();
     } catch (err) {
       console.error('Debounced sync error:', err);
@@ -2810,6 +2823,7 @@ const debouncedSyncToCloud = () => {
  */
 const enhanceStorageWithSync = () => {
   if (!window.storage) return;
+  console.log('enhanceStorageWithSync: hooking storage.set');
 
   const originalSet = window.storage.set;
 
@@ -2818,6 +2832,7 @@ const enhanceStorageWithSync = () => {
 
     // ถ้าเป็น key ที่ต้อง sync → queue ไว้
     if (providerInstance && !isLocalOnly() && SYNC_KEYS.includes(key)) {
+      console.log('storage.set: queuing sync for', key);
       pendingSyncKeys.add(key);
       debouncedSyncToCloud();
     }
@@ -2887,11 +2902,15 @@ const initCloudSync = async () => {
 
   currentProvider = savedConfig.provider;
   const adapter = adapters[currentProvider];
+  console.log('initCloudSync: provider=', currentProvider, 'adapter=', !!adapter);
 
   if (adapter) {
     providerInstance = adapter;
-    if (await adapter.init(savedConfig.config)) {
+    const initResult = await adapter.init(savedConfig.config);
+    console.log('initCloudSync: init result=', initResult);
+    if (initResult) {
       // setupListeners เรียก smartRender โดยตรง (smartRender มี debounce ในตัว)
+      console.log('initCloudSync: calling setupListeners');
       adapter.setupListeners?.();
       enhanceStorageWithSync();
       startPeriodicSync();
