@@ -200,6 +200,8 @@
     // Guide categories
     const GUIDE_CATEGORIES = {
       fish: { id: 'fish', name: 'คู่มือปลา', icon: '🐟', color: 'cyan' },
+      breeding: { id: 'breeding', name: 'การเพาะพันธุ์', icon: '🥚', color: 'amber' },
+      nursery: { id: 'nursery', name: 'การอนุบาล', icon: '🍼', color: 'blue' },
       supplement: { id: 'supplement', name: 'วิตามิน/อาหารเสริม', icon: '💊', color: 'green' },
       disease: { id: 'disease', name: 'โรคและการรักษา', icon: '🏥', color: 'red' },
       other: { id: 'other', name: 'อื่นๆ', icon: '📚', color: 'purple' }
@@ -1443,6 +1445,23 @@
                 ` : ''}
               `;
             })()}
+          </div>
+
+          <!-- Breeding & Sales Module Quick Access -->
+          <div class="mb-6">
+            <button onclick="if(window.openBreedingModule) openBreedingModule(); else showToast('กำลังโหลดโมดูล...', 'info');"
+              class="w-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 rounded-2xl p-4 border border-amber-500/30 hover:border-amber-400/50 transition-all text-left group">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 bg-amber-500/20 rounded-xl flex items-center justify-center text-2xl">🥚</div>
+                  <div>
+                    <h3 class="font-semibold text-amber-400">โมดูลเพาะพันธุ์และขาย</h3>
+                    <p class="text-xs text-slate-400">พ่อแม่พันธุ์ • อนุบาล • ลูกค้า • การจอง</p>
+                  </div>
+                </div>
+                <span class="text-amber-500 group-hover:text-amber-400 text-xl transition-colors">›</span>
+              </div>
+            </button>
           </div>
 
           <div class="flex items-center justify-between mb-4">
@@ -5434,5 +5453,9 @@
 
   <!-- Cloud Sync Module -->
   <script src="firebase-sync.js"></script>
+
+  <!-- Breeding, Nursery & Sales Module -->
+  <script src="fish-farm-breeding.js"></script>
+  <script src="fish-farm-breeding-ui.js"></script>
 </body>
 </html>
