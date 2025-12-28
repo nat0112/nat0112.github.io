@@ -1,5 +1,5 @@
 // Fish Farm Pro - Service Worker
-const CACHE_NAME = 'fish-farm-v1.5.0';
+const CACHE_NAME = 'fish-farm-v1.5.2';
 const urlsToCache = [
   './',
   './index.html',
