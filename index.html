@@ -2309,7 +2309,7 @@
               </div>
 
               <!-- Sync Actions -->
-              <div class="grid grid-cols-2 gap-2 mb-4">
+              <div class="grid grid-cols-2 gap-2 mb-2">
                 <button onclick="manualSyncUpload()" class="p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline() ? 'disabled' : ''}>
                   <span class="text-xl">📤</span>
                   <span>อัพโหลดขึ้น Cloud</span>
@@ -2317,6 +2317,18 @@
                 <button onclick="manualSyncDownload()" class="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline() ? 'disabled' : ''}>
                   <span class="text-xl">📥</span>
                   <span>ดาวน์โหลดจาก Cloud</span>
+                </button>
+              </div>
+
+              <!-- Force Pull & Debug -->
+              <div class="grid grid-cols-2 gap-2 mb-4">
+                <button onclick="forcePullFromCloud()" class="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-xl transition-colors text-sm flex flex-col items-center gap-1" ${!isOnline() ? 'disabled' : ''}>
+                  <span class="text-xl">⚡</span>
+                  <span>บังคับดึง (Force)</span>
+                </button>
+                <button onclick="window.cloudSync?.showDebug()" class="p-3 bg-slate-600/50 hover:bg-slate-600 border border-slate-500/30 text-slate-300 rounded-xl transition-colors text-sm flex flex-col items-center gap-1">
+                  <span class="text-xl">🔍</span>
+                  <span>ตรวจสอบสถานะ</span>
                 </button>
               </div>
 
@@ -5435,6 +5447,26 @@
         showToast('✅ ดาวน์โหลดสำเร็จ', 'success');
         render();
       }, 'warning');
+    };
+
+    // Force Pull - ดึงข้อมูลจาก Cloud โดยไม่ merge (overwrite local)
+    window.forcePullFromCloud = async () => {
+      if (!window.cloudSync?.isOnline()) {
+        showToast('ไม่สามารถเชื่อมต่อ Cloud ได้', 'error');
+        return;
+      }
+      showConfirm(
+        '⚡ บังคับดึงข้อมูล',
+        '⚠️ ข้อมูลในเครื่องจะถูกเขียนทับด้วยข้อมูลจาก Cloud ทั้งหมด!\n\nใช้เมื่อต้องการให้ข้อมูลตรงกับ Cloud 100%',
+        async () => {
+          showToast('กำลังดึงข้อมูล...', 'info');
+          const success = await window.cloudSync.forcePull();
+          if (success) {
+            render();
+          }
+        },
+        'danger'
+      );
     };
 
     window.confirmResetFirebase = () => {
