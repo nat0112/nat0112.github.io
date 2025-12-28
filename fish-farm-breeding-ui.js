@@ -104,14 +104,20 @@
       const totalFingerlings = fingerlings.reduce((sum, f) => sum + f.availableCount, 0);
 
       return `
-        <div class="p-4 pb-24 fade-in">
+        <div class="min-h-screen">
           <!-- Header -->
-          <div class="flex items-center justify-between mb-6">
-            <div>
-              <h1 class="text-xl font-bold text-slate-100">เพาะพันธุ์ & ขาย</h1>
-              <p class="text-slate-400 text-sm">จัดการการเพาะ อนุบาล และการขาย</p>
+          <header class="sticky top-0 bg-slate-900/95 backdrop-blur-xl border-b border-slate-700/50 z-40">
+            <div class="flex items-center justify-between p-4 max-w-lg mx-auto">
+              <button onclick="closeBreedingModuleAndReturn()" class="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+                <span>‹</span>
+                <span>กลับ</span>
+              </button>
+              <h1 class="font-semibold text-slate-100">เพาะพันธุ์ & ขาย</h1>
+              <div class="w-12"></div>
             </div>
-          </div>
+          </header>
+
+          <div class="p-4 pb-24 max-w-lg mx-auto fade-in">
 
           <!-- Quick Stats -->
           <div class="grid grid-cols-2 gap-3 mb-6">
@@ -194,6 +200,7 @@
                 <div class="text-slate-500">›</div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       `;
@@ -713,13 +720,13 @@
                   <div class="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center text-xl">
                     ${c.isVip ? '⭐' : '👤'}
                   </div>
-                  <div class="flex-1">
+                  <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-slate-100 font-medium">${c.name}</span>
                       ${c.isVip ? '<span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">VIP</span>' : ''}
                     </div>
                     <div class="text-slate-400 text-sm">${c.phone || '-'}</div>
-                    ${c.province ? `<div class="text-slate-500 text-xs">📍 ${c.province}</div>` : ''}
+                    ${c.notes ? `<div class="text-amber-400/80 text-xs truncate">📝 ${c.notes}</div>` : c.province ? `<div class="text-slate-500 text-xs">📍 ${c.province}</div>` : ''}
                   </div>
                   <div class="text-right">
                     <div class="text-green-400 font-medium">${formatCurrency(c.totalSpent || 0)}</div>
@@ -801,6 +808,12 @@
                 <div class="flex items-center gap-3">
                   <span class="text-slate-500 w-20">🏷️ ส่วนลด</span>
                   <span class="text-green-400">${c.discount}%</span>
+                </div>
+              ` : ''}
+              ${c.notes ? `
+                <div class="flex items-start gap-3 pt-2 mt-2 border-t border-slate-700/50">
+                  <span class="text-slate-500 w-20">📝 โน้ต</span>
+                  <span class="text-amber-300 text-sm">${c.notes}</span>
                 </div>
               ` : ''}
             </div>
@@ -1148,6 +1161,10 @@
             <label class="text-slate-400 text-sm">ที่อยู่</label>
             <textarea name="address" rows="2" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100"></textarea>
           </div>
+          <div>
+            <label class="text-slate-400 text-sm">หมายเหตุ (เพื่อจำง่าย)</label>
+            <textarea name="notes" rows="2" placeholder="เช่น ชอบปลาตัวใหญ่, จ่ายเงินสดเสมอ, เคยมีปัญหา..." class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100 placeholder:text-slate-500"></textarea>
+          </div>
           <div class="flex items-center gap-3">
             <input type="checkbox" name="isVip" id="isVip" class="w-5 h-5 rounded">
             <label for="isVip" class="text-slate-300">⭐ ลูกค้า VIP</label>
@@ -1170,6 +1187,7 @@
         lineId: form.lineId.value,
         province: form.province.value,
         address: form.address.value,
+        notes: form.notes.value,
         isVip: form.isVip.checked
       });
       closeBreedingModal();
@@ -1566,39 +1584,34 @@
 
     // ===== Add to Main Navigation =====
     const addBreedingNav = () => {
-      // Create container for breeding module if not exists
+      // Create container for breeding module as overlay (outside #app to avoid render() overwriting)
       if (!document.getElementById('breeding-module-container')) {
         const container = document.createElement('div');
         container.id = 'breeding-module-container';
+        container.className = 'fixed inset-0 z-[100] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 overflow-y-auto';
         container.style.display = 'none';
-        document.getElementById('app').appendChild(container);
+        document.body.appendChild(container);
       }
     };
 
     // Open breeding module
     window.openBreedingModule = () => {
-      document.getElementById('app').querySelectorAll(':scope > div').forEach(div => {
-        if (div.id !== 'breeding-module-container') {
-          div.style.display = 'none';
-        }
-      });
       const container = document.getElementById('breeding-module-container');
       if (container) {
         container.style.display = 'block';
+        document.body.style.overflow = 'hidden'; // Prevent background scroll
+        breedingState.currentView = 'breeding-main'; // Reset to main view
         renderBreedingModule();
       }
     };
 
     // Close breeding module
     window.closeBreedingModuleAndReturn = () => {
-      document.getElementById('breeding-module-container').style.display = 'none';
-      // Show main app content
-      document.getElementById('app').querySelectorAll(':scope > div').forEach(div => {
-        if (div.id !== 'breeding-module-container') {
-          div.style.display = 'block';
-        }
-      });
-      if (window.render) window.render();
+      const container = document.getElementById('breeding-module-container');
+      if (container) {
+        container.style.display = 'none';
+        document.body.style.overflow = ''; // Restore scroll
+      }
     };
 
     addBreedingNav();
