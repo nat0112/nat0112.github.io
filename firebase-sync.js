@@ -2993,6 +2993,248 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
+// =============================================================================
+// FORCE PULL FROM CLOUD (Override Local)
+// =============================================================================
+/**
+ * บังคับดึงข้อมูลจาก Cloud มาแทนที่ข้อมูลใน Local ทั้งหมด
+ * ใช้เมื่อต้องการให้ข้อมูลตรงกับ Cloud 100%
+ *
+ * ⚠️ ข้อมูลใน Local จะถูกเขียนทับทั้งหมด!
+ */
+const forcePullFromCloud = async () => {
+  if (!providerInstance) {
+    showToast('ยังไม่ได้ตั้งค่า Cloud Sync', 'error');
+    return false;
+  }
+
+  if (!isOnline) {
+    showToast('ไม่มีการเชื่อมต่อ Cloud', 'error');
+    return false;
+  }
+
+  isSyncing = true;
+  updateSyncStatus();
+
+  try {
+    // Firebase Realtime Database
+    if (currentProvider === 'firebase' && adapters.firebase.db) {
+      const snapshot = await adapters.firebase.db.ref().once('value');
+      const cloudData = snapshot.val() || {};
+
+      let pulledCount = 0;
+      for (const key of SYNC_KEYS) {
+        const dbKey = key.replace('ff_', '');
+        const cloudKeyData = cloudData[dbKey];
+
+        if (cloudKeyData !== undefined && cloudKeyData !== null) {
+          const dataArray = toArray(cloudKeyData);
+          localStorage.setItem(key, JSON.stringify(dataArray));
+          pulledCount++;
+        }
+      }
+
+      showToast(`ดึงข้อมูลสำเร็จ ${pulledCount} รายการ`, 'success');
+      smartRender(true);
+      return true;
+    }
+
+    // Firestore
+    if (currentProvider === 'firestore' && adapters.firestore.db) {
+      const snapshot = await adapters.firestore.db.collection('fish_farm').get();
+
+      let pulledCount = 0;
+      snapshot.forEach(doc => {
+        if (SYNC_KEYS.includes(doc.id)) {
+          const data = doc.data().data || [];
+          localStorage.setItem(doc.id, JSON.stringify(data));
+          pulledCount++;
+        }
+      });
+
+      showToast(`ดึงข้อมูลสำเร็จ ${pulledCount} รายการ`, 'success');
+      smartRender(true);
+      return true;
+    }
+
+    // Supabase
+    if (currentProvider === 'supabase' && adapters.supabase.client) {
+      const { data: cloudRows, error } = await adapters.supabase.client
+        .from('fish_farm_sync')
+        .select('*');
+
+      if (error) throw error;
+
+      let pulledCount = 0;
+      cloudRows?.forEach(row => {
+        if (SYNC_KEYS.includes(row.key)) {
+          localStorage.setItem(row.key, JSON.stringify(row.data || []));
+          pulledCount++;
+        }
+      });
+
+      showToast(`ดึงข้อมูลสำเร็จ ${pulledCount} รายการ`, 'success');
+      smartRender(true);
+      return true;
+    }
+
+    // Fallback for other providers
+    await providerInstance.syncFromCloud?.();
+    showToast('ดึงข้อมูลสำเร็จ', 'success');
+    smartRender(true);
+    return true;
+
+  } catch (e) {
+    console.error('Force pull error:', e);
+    showToast('เกิดข้อผิดพลาด: ' + e.message, 'error');
+    return false;
+  } finally {
+    isSyncing = false;
+    updateSyncStatus();
+  }
+};
+
+// =============================================================================
+// DEBUG INFO - แสดงสถานะละเอียดของ Cloud Sync
+// =============================================================================
+/**
+ * รวบรวมข้อมูล debug สำหรับตรวจสอบปัญหา Cloud Sync
+ */
+const getDebugInfo = async () => {
+  const config = safeJSONParse(localStorage.getItem(SYNC_CONFIG_KEY), null);
+  const metadata = getSyncMetadata();
+
+  const info = {
+    // สถานะการเชื่อมต่อ
+    isOnline,
+    isLocalOnly: isLocalOnly(),
+    currentProvider,
+    isSyncing,
+    syncLock,
+
+    // การตั้งค่า
+    hasConfig: !!config,
+    provider: config?.provider || 'none',
+    databaseURL: config?.databaseURL ? config.databaseURL.substring(0, 50) + '...' : 'none',
+
+    // Metadata
+    lastSync: metadata.lastSync || 'never',
+    deviceId: getDeviceId(),
+    syncCount: metadata.syncCount || 0,
+
+    // ข้อมูลใน Local
+    localDataCounts: {}
+  };
+
+  // นับจำนวนข้อมูลใน Local
+  for (const key of SYNC_KEYS) {
+    const data = safeJSONParse(localStorage.getItem(key), []);
+    const activeCount = data.filter(item => !item?.deleted).length;
+    const deletedCount = data.filter(item => item?.deleted).length;
+    info.localDataCounts[key.replace('ff_', '')] = { active: activeCount, deleted: deletedCount };
+  }
+
+  // ดึงข้อมูลจาก Cloud ถ้าเชื่อมต่ออยู่
+  if (isOnline && currentProvider === 'firebase' && adapters.firebase.db) {
+    try {
+      const snapshot = await adapters.firebase.db.ref().once('value');
+      const cloudData = snapshot.val() || {};
+
+      info.cloudDataCounts = {};
+      for (const key of SYNC_KEYS) {
+        const dbKey = key.replace('ff_', '');
+        const data = toArray(cloudData[dbKey] || []);
+        const activeCount = data.filter(item => !item?.deleted).length;
+        const deletedCount = data.filter(item => item?.deleted).length;
+        info.cloudDataCounts[dbKey] = { active: activeCount, deleted: deletedCount };
+      }
+    } catch (e) {
+      info.cloudError = e.message;
+    }
+  }
+
+  return info;
+};
+
+/**
+ * แสดง Debug Modal
+ */
+const showDebugModal = async () => {
+  const info = await getDebugInfo();
+
+  const formatCounts = (counts) => {
+    if (!counts) return '<div class="text-slate-500">ไม่สามารถดึงข้อมูลได้</div>';
+    return Object.entries(counts).map(([key, val]) =>
+      `<div class="flex justify-between text-sm py-1 border-b border-slate-700/30">
+        <span class="text-slate-400">${key}</span>
+        <span class="text-slate-200">${val.active} <span class="text-slate-500">(+${val.deleted} deleted)</span></span>
+      </div>`
+    ).join('');
+  };
+
+  const modal = document.createElement('div');
+  modal.id = 'debug-modal';
+  modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4';
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+  modal.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between p-4 border-b border-slate-700/50">
+        <h2 class="text-lg font-semibold">🔍 Debug Cloud Sync</h2>
+        <button onclick="this.closest('#debug-modal').remove()" class="p-2 hover:bg-slate-700 rounded-lg">✕</button>
+      </div>
+      <div class="p-4 overflow-y-auto space-y-4">
+        <!-- สถานะ -->
+        <div class="bg-slate-700/30 rounded-xl p-3">
+          <div class="text-xs text-slate-500 mb-2">สถานะการเชื่อมต่อ</div>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="flex justify-between"><span class="text-slate-400">Online:</span> <span class="${info.isOnline ? 'text-green-400' : 'text-red-400'}">${info.isOnline ? '✅ ใช่' : '❌ ไม่'}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Provider:</span> <span class="text-slate-200">${info.currentProvider || 'none'}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Local Only:</span> <span class="${info.isLocalOnly ? 'text-amber-400' : 'text-green-400'}">${info.isLocalOnly ? '⚠️ ใช่' : '✅ ไม่'}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Syncing:</span> <span class="text-slate-200">${info.isSyncing ? '⏳ กำลังซิงค์' : '✅ ไม่'}</span></div>
+          </div>
+        </div>
+
+        <!-- Metadata -->
+        <div class="bg-slate-700/30 rounded-xl p-3">
+          <div class="text-xs text-slate-500 mb-2">ข้อมูล Sync</div>
+          <div class="text-sm space-y-1">
+            <div class="flex justify-between"><span class="text-slate-400">Last Sync:</span> <span class="text-slate-200">${info.lastSync !== 'never' ? new Date(info.lastSync).toLocaleString('th-TH') : 'ยังไม่เคย'}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Device ID:</span> <span class="text-slate-200 font-mono text-xs">${info.deviceId.substring(0, 20)}...</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Sync Count:</span> <span class="text-slate-200">${info.syncCount} ครั้ง</span></div>
+          </div>
+        </div>
+
+        <!-- Local Data -->
+        <div class="bg-slate-700/30 rounded-xl p-3">
+          <div class="text-xs text-slate-500 mb-2">📱 ข้อมูลใน Local</div>
+          ${formatCounts(info.localDataCounts)}
+        </div>
+
+        <!-- Cloud Data -->
+        <div class="bg-slate-700/30 rounded-xl p-3">
+          <div class="text-xs text-slate-500 mb-2">☁️ ข้อมูลใน Cloud</div>
+          ${info.cloudError ? `<div class="text-red-400 text-sm">Error: ${info.cloudError}</div>` : formatCounts(info.cloudDataCounts)}
+        </div>
+
+        <!-- Actions -->
+        <div class="space-y-2">
+          <button onclick="window.cloudSync.forcePull().then(() => this.closest('#debug-modal').remove())"
+                  class="w-full p-3 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-purple-400 rounded-xl text-sm font-medium">
+            📥 บังคับดึงจาก Cloud (Force Pull)
+          </button>
+          <button onclick="navigator.clipboard.writeText(JSON.stringify(${JSON.stringify(info).replace(/"/g, '&quot;')}, null, 2)); window.showToast('คัดลอกแล้ว', 'success');"
+                  class="w-full p-3 bg-slate-600/50 hover:bg-slate-600 text-slate-300 rounded-xl text-sm">
+            📋 คัดลอกข้อมูล Debug
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+};
+
 // Export
 window.cloudSync = {
   isOnline: () => isOnline,
@@ -3000,7 +3242,10 @@ window.cloudSync = {
   getProvider: () => currentProvider,
   syncToCloud: () => providerInstance?.syncToCloud?.(),
   syncFromCloud: () => providerInstance?.syncFromCloud?.(),
+  forcePull: forcePullFromCloud,
   showSetup: showSyncSetupModal,
+  showDebug: showDebugModal,
+  getDebugInfo,
   reset: window.resetSyncConfig,
   PROVIDERS
 };
