@@ -661,7 +661,10 @@
             ` : sales.slice(0, 20).map(sale => `
               <div class="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-slate-100 font-medium">${sale.customerName || 'ลูกค้าทั่วไป'}</span>
+                  <div class="flex items-center gap-2">
+                    <span class="${sale.saleType === 'harvest' ? 'text-green-400' : 'text-blue-400'}">${sale.saleType === 'harvest' ? '🎣' : '🐟'}</span>
+                    <span class="text-slate-100 font-medium">${sale.customerName || 'ลูกค้าทั่วไป'}</span>
+                  </div>
                   <span class="text-green-400 font-bold">${formatCurrency(sale.totalAmount)}</span>
                 </div>
                 <div class="flex items-center justify-between text-sm">
@@ -669,8 +672,12 @@
                   <span class="text-slate-500">${formatDateTime(sale.saleDate)}</span>
                 </div>
                 <div class="text-slate-500 text-xs mt-1">
-                  ${sale.totalQuantity} ตัว • ${sale.paymentMethod === 'cash' ? 'เงินสด' : sale.paymentMethod === 'transfer' ? 'โอน' : 'เครดิต'}
+                  ${sale.saleType === 'harvest'
+                    ? `${sale.items?.[0]?.weightKg || 0} กก. @ ${formatCurrency(sale.items?.[0]?.pricePerKg || 0)}/กก.${sale.pondName ? ' • ' + sale.pondName : ''}`
+                    : `${sale.totalQuantity || sale.items?.[0]?.quantity || 0} ตัว`
+                  } • ${sale.paymentMethod === 'cash' ? 'เงินสด' : sale.paymentMethod === 'transfer' ? 'โอน' : 'เครดิต'}
                 </div>
+                ${sale.notes ? `<div class="text-amber-400/70 text-xs mt-1">📝 ${sale.notes}</div>` : ''}
               </div>
             `).join('')}
           </div>
@@ -1328,34 +1335,93 @@
     const renderNewSaleModal = () => {
       const customers = window.customersDb.getAll();
       const stocks = window.fingerlingStockDb.getAvailable();
+      // Get ponds with active cycles from main app
+      const ponds = window.db?.ponds?.getAll() || [];
+      const activePonds = ponds.filter(p => {
+        const cycle = window.db?.cycles?.getActive(p.id);
+        return cycle;
+      }).map(p => {
+        const cycle = window.db?.cycles?.getActive(p.id);
+        return { pond: p, cycle };
+      });
+
       return `
         <h3 class="text-xl font-bold text-slate-100 mb-4">บันทึกการขาย</h3>
         <form onsubmit="submitNewSale(event)">
           <div class="space-y-4">
+            <!-- Sale Type Tabs -->
+            <div class="flex gap-2 p-1 bg-slate-800 rounded-xl">
+              <button type="button" onclick="switchSaleType('fingerling')" id="tab-fingerling" class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-500 text-white">
+                🐟 ลูกปลา
+              </button>
+              <button type="button" onclick="switchSaleType('harvest')" id="tab-harvest" class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:bg-slate-700">
+                🎣 ปลาโต
+              </button>
+            </div>
+
+            <input type="hidden" name="saleType" id="saleTypeInput" value="fingerling">
+
             <div>
               <label class="text-slate-400 text-sm">ลูกค้า</label>
               <select name="customerId" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
                 <option value="">ลูกค้าทั่วไป</option>
-                ${customers.map(c => `<option value="${c.id}" ${breedingState.selectedCustomer === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                ${customers.map(c => `<option value="${c.id}" ${breedingState.selectedCustomer === c.id ? 'selected' : ''}>${c.name}${c.notes ? ' - ' + c.notes.substring(0, 20) : ''}</option>`).join('')}
               </select>
             </div>
-            <div>
-              <label class="text-slate-400 text-sm">สต๊อกลูกปลา</label>
-              <select name="stockId" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
-                <option value="">-- เลือกสต๊อก --</option>
-                ${stocks.map(s => `<option value="${s.id}" data-price="${s.pricePerFish}">${getFishTypeName(s.fishTypeId)} - ${s.size} (${formatNumber(s.availableCount)} ตัว @ ${formatCurrency(s.pricePerFish)})</option>`).join('')}
-              </select>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
+
+            <!-- Fingerling Section -->
+            <div id="fingerling-section">
               <div>
-                <label class="text-slate-400 text-sm">จำนวน (ตัว) *</label>
-                <input type="number" name="quantity" required class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                <label class="text-slate-400 text-sm">สต๊อกลูกปลา</label>
+                <select name="stockId" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                  <option value="">-- เลือกสต๊อก --</option>
+                  ${stocks.map(s => `<option value="${s.id}" data-price="${s.pricePerFish}">${getFishTypeName(s.fishTypeId)} - ${s.size} (${formatNumber(s.availableCount)} ตัว @ ${formatCurrency(s.pricePerFish)})</option>`).join('')}
+                </select>
               </div>
-              <div>
-                <label class="text-slate-400 text-sm">ราคา/ตัว *</label>
-                <input type="number" name="pricePerFish" step="0.01" required class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label class="text-slate-400 text-sm">จำนวน (ตัว) *</label>
+                  <input type="number" name="quantity" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                </div>
+                <div>
+                  <label class="text-slate-400 text-sm">ราคา/ตัว *</label>
+                  <input type="number" name="pricePerFish" step="0.01" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                </div>
               </div>
             </div>
+
+            <!-- Harvest Section (hidden by default) -->
+            <div id="harvest-section" style="display:none;">
+              <div>
+                <label class="text-slate-400 text-sm">บ่อเลี้ยง</label>
+                <select name="pondId" onchange="updatePondInfo(this.value)" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                  <option value="">-- เลือกบ่อ --</option>
+                  ${activePonds.map(({pond, cycle}) => `<option value="${pond.id}" data-cycle="${cycle.id}">${pond.name} - ${cycle.fishTypeName} (วันที่ ${Math.ceil((new Date() - new Date(cycle.startDate)) / 86400000)})</option>`).join('')}
+                </select>
+              </div>
+              <div id="pond-info" class="hidden mt-2 p-3 bg-slate-700/50 rounded-xl text-sm text-slate-300"></div>
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label class="text-slate-400 text-sm">น้ำหนัก (กก.) *</label>
+                  <input type="number" name="weightKg" step="0.1" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                </div>
+                <div>
+                  <label class="text-slate-400 text-sm">ราคา/กก. *</label>
+                  <input type="number" name="pricePerKg" step="0.5" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label class="text-slate-400 text-sm">จำนวน (ตัว)</label>
+                  <input type="number" name="fishCount" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100" placeholder="ถ้านับได้">
+                </div>
+                <div>
+                  <label class="text-slate-400 text-sm">ขนาดเฉลี่ย (ก./ตัว)</label>
+                  <input type="number" name="avgWeight" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100" placeholder="ถ้าทราบ">
+                </div>
+              </div>
+            </div>
+
             <div>
               <label class="text-slate-400 text-sm">วิธีชำระเงิน</label>
               <select name="paymentMethod" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100">
@@ -1363,6 +1429,11 @@
                 <option value="transfer">โอนเงิน</option>
                 <option value="credit">เครดิต</option>
               </select>
+            </div>
+
+            <div>
+              <label class="text-slate-400 text-sm">หมายเหตุ</label>
+              <input type="text" name="notes" class="w-full mt-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-slate-100" placeholder="รายละเอียดเพิ่มเติม...">
             </div>
           </div>
           <div class="flex gap-3 mt-6">
@@ -1373,28 +1444,123 @@
       `;
     };
 
+    // Switch sale type tabs
+    window.switchSaleType = (type) => {
+      document.getElementById('saleTypeInput').value = type;
+      document.getElementById('fingerling-section').style.display = type === 'fingerling' ? 'block' : 'none';
+      document.getElementById('harvest-section').style.display = type === 'harvest' ? 'block' : 'none';
+      document.getElementById('tab-fingerling').className = type === 'fingerling' ? 'flex-1 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-500 text-white' : 'flex-1 py-2 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:bg-slate-700';
+      document.getElementById('tab-harvest').className = type === 'harvest' ? 'flex-1 py-2 rounded-lg text-sm font-medium transition-colors bg-green-500 text-white' : 'flex-1 py-2 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:bg-slate-700';
+    };
+
+    // Update pond info when selected
+    window.updatePondInfo = (pondId) => {
+      const infoDiv = document.getElementById('pond-info');
+      if (!pondId) {
+        infoDiv.classList.add('hidden');
+        return;
+      }
+      const cycle = window.db?.cycles?.getActive(pondId);
+      if (cycle) {
+        const stats = window.calculations?.getCycleStats(cycle.id);
+        infoDiv.innerHTML = `
+          <div class="flex justify-between"><span>ชนิดปลา:</span> <span class="text-slate-100">${cycle.fishTypeName}</span></div>
+          <div class="flex justify-between"><span>จำนวนเริ่มต้น:</span> <span class="text-slate-100">${cycle.initialCount} ตัว</span></div>
+          <div class="flex justify-between"><span>อาหารสะสม:</span> <span class="text-slate-100">${stats?.totalFeed?.toFixed(1) || 0} กก.</span></div>
+        `;
+        infoDiv.classList.remove('hidden');
+      }
+    };
+
     window.submitNewSale = (e) => {
       e.preventDefault();
       const form = e.target;
+      const saleType = form.saleType.value;
       const customer = window.customersDb.getById(form.customerId.value);
-      const quantity = parseInt(form.quantity.value);
-      const pricePerFish = parseFloat(form.pricePerFish.value);
 
-      window.salesDb.create({
-        customerId: form.customerId.value || null,
-        customerName: customer?.name || 'ลูกค้าทั่วไป',
-        saleType: 'fingerling',
-        items: [{
-          stockId: form.stockId.value || null,
-          quantity: quantity,
-          pricePerUnit: pricePerFish,
-          amount: quantity * pricePerFish
-        }],
-        paymentMethod: form.paymentMethod.value,
-        paymentStatus: 'paid'
-      });
+      if (saleType === 'fingerling') {
+        // ขายลูกปลา
+        const quantity = parseInt(form.quantity.value) || 0;
+        const pricePerFish = parseFloat(form.pricePerFish.value) || 0;
+
+        if (!quantity || !pricePerFish) {
+          window.showToast?.('กรุณากรอกจำนวนและราคา', 'error');
+          return;
+        }
+
+        window.salesDb.create({
+          customerId: form.customerId.value || null,
+          customerName: customer?.name || 'ลูกค้าทั่วไป',
+          saleType: 'fingerling',
+          items: [{
+            stockId: form.stockId.value || null,
+            quantity: quantity,
+            pricePerUnit: pricePerFish,
+            amount: quantity * pricePerFish
+          }],
+          paymentMethod: form.paymentMethod.value,
+          paymentStatus: 'paid',
+          notes: form.notes.value || ''
+        });
+      } else {
+        // ขายปลาโต (harvest)
+        const weightKg = parseFloat(form.weightKg.value) || 0;
+        const pricePerKg = parseFloat(form.pricePerKg.value) || 0;
+        const pondId = form.pondId.value;
+
+        if (!weightKg || !pricePerKg) {
+          window.showToast?.('กรุณากรอกน้ำหนักและราคา', 'error');
+          return;
+        }
+
+        // Get pond and cycle info
+        const pond = window.db?.ponds?.getById(pondId);
+        const cycle = window.db?.cycles?.getActive(pondId);
+
+        window.salesDb.create({
+          customerId: form.customerId.value || null,
+          customerName: customer?.name || 'ลูกค้าทั่วไป',
+          saleType: 'harvest',
+          pondId: pondId || null,
+          pondName: pond?.name || '',
+          cycleId: cycle?.id || null,
+          fishTypeName: cycle?.fishTypeName || '',
+          items: [{
+            type: 'harvest',
+            weightKg: weightKg,
+            pricePerKg: pricePerKg,
+            fishCount: parseInt(form.fishCount.value) || null,
+            avgWeight: parseFloat(form.avgWeight.value) || null,
+            amount: weightKg * pricePerKg
+          }],
+          paymentMethod: form.paymentMethod.value,
+          paymentStatus: 'paid',
+          notes: form.notes.value || ''
+        });
+
+        // Also create harvest record in main app if cycle exists
+        if (cycle && window.db?.harvests?.create) {
+          window.db.harvests.create({
+            cycleId: cycle.id,
+            pondId: pondId,
+            weightKg: weightKg,
+            pricePerKg: pricePerKg,
+            count: parseInt(form.fishCount.value) || 0,
+            avgWeight: parseFloat(form.avgWeight.value) || 0,
+            buyer: customer?.name || 'ลูกค้าทั่วไป',
+            notes: form.notes.value || ''
+          });
+        }
+      }
+
+      // Update customer stats
+      if (form.customerId.value) {
+        window.customersDb.updateStats?.(form.customerId.value);
+      }
+
       closeBreedingModal();
       renderBreedingModule();
+      window.showToast?.('บันทึกการขายสำเร็จ', 'success');
     };
 
     // New Order Modal
