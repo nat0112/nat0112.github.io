@@ -1,9 +1,11 @@
 // Fish Farm Pro - Service Worker
-const CACHE_NAME = 'fish-farm-v1.3.0';
+const CACHE_NAME = 'fish-farm-v1.5.0';
 const urlsToCache = [
   './',
   './index.html',
   './firebase-sync.js',
+  './fish-farm-breeding.js',
+  './fish-farm-breeding-ui.js',
   './manifest.json',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png'
